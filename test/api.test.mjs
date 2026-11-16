@@ -120,6 +120,7 @@ r = await A('PATCH', '/api/me', { lang: 'ro' });
 ok(r.data.user.lang === 'ro', 'language saved');
 
 // личные данные: выключены по умолчанию, включает администратор
+(await import('child_process')).execSync(`psql -h /tmp -p 5433 -U postgres -d ${process.env.TEST_DB || 'dolya'} -c "delete from app_settings"`);
 r = await A('PATCH', '/api/me', { idnp: '2001234567890' });
 ok(r.status === 403, 'personal data input is off by default');
 r = await A('PUT', '/api/admin/settings', { personal_data: true });
@@ -175,6 +176,57 @@ ok(r.data.html.includes('născut(ă) la <b>01.05.1990</b>'), 'birth date in cont
 await A('PUT', '/api/admin/settings', { personal_data: false });
 r = await D('GET', `/api/objects/${oid}/contract`);
 ok(r.data.personal_data === false, 'switch off visible to participants');
+
+// аванс от покупателя
+r = await I('POST', `/api/objects/${oid}/advances`, { amount: 2000, valid_until: '2099-01-01' });
+ok(r.status === 403, 'foreman cannot register advance');
+r = await D('POST', `/api/objects/${oid}/advances`, { amount: 2000 });
+ok(r.status === 400, 'advance needs valid-until date');
+r = await D('POST', `/api/objects/${oid}/advances`, { amount: 2000, buyer: 'Покупатель', valid_until: '2099-01-01' });
+const adv1 = r.data.id;
+let before = (await A('GET', `/api/objects/${oid}`)).data;
+ok(before.calc.advanceActive === 2000 && before.advances[0].days_left > 1000 && before.advances[0].status === 'active', 'active advance visible with days left');
+const profit0 = before.calc.profit;
+const denInv0 = before.members.find((m) => m.name.startsWith('Денис')).invested;
+r = await B('POST', `/api/advances/${adv1}/status`, { status: 'kept' });
+ok(r.status === 403, 'viewer cannot close advance');
+r = await D('POST', `/api/advances/${adv1}/status`, { status: 'kept' });
+ok(r.status === 200, 'advance kept');
+let after = (await A('GET', `/api/objects/${oid}`)).data;
+ok(after.calc.profit === profit0 + 2000 && after.calc.advanceKept === 2000, 'kept advance adds to profit: ' + after.calc.profit);
+ok(after.members.find((m) => m.name.startsWith('Денис')).invested === denInv0, 'holder investment unchanged');
+ok(JSON.stringify(after.calc.settlement) !== JSON.stringify(before.calc.settlement), 'kept advance cash is shared in settlement');
+r = await D('POST', `/api/advances/${adv1}/status`, { status: 'returned' });
+ok(r.status === 400, 'closed advance cannot change');
+r = await D('POST', `/api/objects/${oid}/advances`, { amount: 1500, valid_until: '2020-01-01' });
+const adv2 = r.data.id;
+after = (await A('GET', `/api/objects/${oid}`)).data;
+ok(after.advances.find((a) => a.id === adv2).days_left < 0, 'expired advance has negative days');
+r = await A('POST', `/api/advances/${adv2}/status`, { status: 'returned' });
+ok(r.status === 200, 'creator can close partner advance');
+after = (await A('GET', `/api/objects/${oid}`)).data;
+ok(after.calc.profit === profit0 + 2000, 'returned advance does not change profit');
+
+// договор аванса с покупателем
+r = await D('POST', `/api/objects/${oid}/advances`, { amount: 3000, buyer: 'Ion Rusu', buyer_idnp: '2003333333333', buyer_address: 'or. Bălți', buyer_phone: '+37369000000', sale_price: 105000, valid_until: '2099-02-01', return_mode: 'double', city: 'mun. Chișinău' });
+const adv3 = r.data.id;
+r = await D('GET', `/api/advances/${adv3}`);
+ok(r.data.html.includes('CONTRACT DE ARVUNĂ') && r.data.html.includes('ДОГОВОР ЗАДАТКА') && r.data.html.includes('Ion Rusu') && r.data.html.includes('în mărime dublă') && r.data.html.includes('в двойном размере'), 'bilingual advance contract');
+ok(r.data.can_sign_seller && r.data.can_collect_buyer && r.data.can_edit, 'receiver can sign and collect buyer signature');
+r = await A('GET', `/api/advances/${adv3}`);
+ok(!r.data.can_sign_seller && r.data.can_collect_buyer, 'creator can collect buyer signature but not sign as seller');
+r = await B('POST', `/api/advances/${adv3}/sign`, { party: 'buyer', signature: png, agree: true });
+ok(r.status === 403, 'viewer cannot collect signatures');
+r = await D('POST', `/api/advances/${adv3}/sign`, { party: 'seller', signature: png, agree: true });
+ok(r.status === 200, 'seller signed');
+r = await D('PATCH', `/api/advances/${adv3}`, { buyer: 'X' });
+ok(r.status === 400, 'cannot edit after signing');
+r = await D('POST', `/api/advances/${adv3}/sign`, { party: 'buyer', signature: png, agree: true });
+ok(r.data.signed.length === 2, 'buyer signed on seller device');
+r = await D('POST', `/api/advances/${adv3}/contract-link`);
+const al = await fetch(BASE + '/a/' + r.data.url.split('/a/')[1]);
+const alh = await al.text();
+ok(al.status === 200 && (alh.match(/semnat electronic/g) || []).length === 2, 'printable advance contract with both signatures');
 
 // удаление операции с согласия всех
 r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 300, note: 'Ошибка' });

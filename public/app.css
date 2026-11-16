@@ -201,3 +201,7 @@ details.fold.month { border-bottom: 1px solid #1F1F22; }
 details.fold.month > summary { padding: 14px 0; margin: 0; }
 details.fold.month[open] > summary { margin: 0; }
 details.fold.month .rows { padding-bottom: 6px; }
+
+.okc { color: var(--ok); }
+.card.adv { border-color: var(--gold-line); background: var(--gold-bg); }
+.card.adv.expired { border-color: #5A2C27; background: #1E1412; }

@@ -147,3 +147,40 @@ CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL
 );
+
+-- Авансы от покупателя
+CREATE TABLE IF NOT EXISTS advances (
+  id SERIAL PRIMARY KEY,
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id),
+  buyer TEXT,
+  amount NUMERIC NOT NULL CHECK (amount > 0),
+  received_date DATE NOT NULL DEFAULT current_date,
+  valid_until DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'applied', 'kept', 'returned')),
+  note TEXT,
+  closed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS advances_object_idx ON advances(object_id);
+
+-- Договор аванса (задатка) с покупателем
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS buyer_idnp TEXT;
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS buyer_address TEXT;
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS buyer_phone TEXT;
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS sale_price NUMERIC;
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS return_mode TEXT NOT NULL DEFAULT 'double';
+ALTER TABLE advances ADD COLUMN IF NOT EXISTS city TEXT;
+CREATE TABLE IF NOT EXISTS advance_signatures (
+  advance_id INT NOT NULL REFERENCES advances(id) ON DELETE CASCADE,
+  party TEXT NOT NULL CHECK (party IN ('seller', 'buyer')),
+  name TEXT,
+  signature BYTEA NOT NULL,
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (advance_id, party)
+);
+CREATE TABLE IF NOT EXISTS advance_links (
+  token TEXT PRIMARY KEY,
+  advance_id INT NOT NULL REFERENCES advances(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL
+);

@@ -1,0 +1,44 @@
+// UI: аванс от покупателя, договор аванса RO/RU, подписи продавца и покупателя, «аванс наш».
+const path = require('path');
+const G = require('child_process').execSync('npm root -g').toString().trim();
+const { chromium } = require(path.join(G, 'playwright'));
+const BASE = 'http://localhost:3999';
+(async () => {
+  const b = await chromium.launch();
+  const mk = async () => { const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com|telegram\.org/, (r) => r.abort());
+    const p = await ctx.newPage(); p.on('pageerror', (e) => console.log('PAGEERROR', e.message)); p.on('dialog', (d) => d.accept()); return p; };
+  const reg = async (p, f, l) => { await p.goto(BASE + '/#/register'); await p.fill('#fname', f); await p.fill('#lname', l); await p.fill('#email', `adv${Date.now()}${Math.floor(Math.random() * 1e6)}@t.md`); await p.fill('#pw', 'secret1'); await p.click('button.btn'); await p.waitForSelector('.hero-num'); };
+  const a = await mk(); await reg(a, 'Artiom', 'Dede');
+  const oid = await a.evaluate(async () => (await (await fetch('/api/objects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'ДМЗ', area: 43, purchase_price: 75250, sale_price: 90300, status: 'продаётся' }) })).json()).id);
+  await a.goto(`${BASE}/#/o/${oid}`); await a.waitForSelector('h1.h');
+  await a.click(`a[href="#/o/${oid}/advance"]`); await a.waitForSelector('#amt');
+  await a.fill('#amt', '2000'); await a.fill('#buyer', 'Ion Rusu'); await a.click('[data-days="14"]');
+  await a.click('details[data-fold="adv-form"] > summary');
+  await a.fill('#b_idnp', '2003333333333'); await a.fill('#b_addr', 'or. Bălți, str. Independenței 5'); await a.fill('#b_phone', '+373 69 000000'); await a.fill('#b_city', 'mun. Chișinău');
+  await a.screenshot({ path: '/tmp/a1.png', fullPage: true });
+  await a.click('#save'); await a.waitForSelector('.card.adv');
+  await a.screenshot({ path: '/tmp/a2.png' });
+  await a.click('text=Договор аванса · RO / RU'); await a.waitForSelector('#doc');
+  const sign = async (btn) => {
+    await a.click(btn); await a.waitForSelector('.sign-pad canvas');
+    const box = await (await a.$('.sign-pad canvas')).boundingBox();
+    await a.mouse.move(box.x + 30, box.y + box.height * 0.6); await a.mouse.down();
+    for (let i = 0; i <= 25; i++) await a.mouse.move(box.x + 30 + i * 10, box.y + box.height * (0.6 - 0.2 * Math.cos(i / 2)));
+    await a.mouse.up(); await a.check('[data-agree]'); await a.screenshot({ path: '/tmp/a-pad.png' });
+    await a.click('[data-ok]'); await a.waitForTimeout(800);
+  };
+  await sign('#sgSeller');
+  await sign('#sgBuyer');
+  await a.waitForSelector('.card.green');
+  await a.screenshot({ path: '/tmp/a3.png' });
+  const frame = a.frames().find((f) => f !== a.mainFrame());
+  await frame.evaluate(() => document.querySelector('table').scrollIntoView());
+  await a.evaluate(() => document.querySelector('#doc').scrollIntoView());
+  await a.screenshot({ path: '/tmp/a4.png' });
+  await a.goto(`${BASE}/#/o/${oid}`); await a.waitForSelector('.card.adv');
+  await a.click('[data-st="kept"]'); await a.waitForSelector('details[data-fold^="adv-"]');
+  await a.screenshot({ path: '/tmp/a5.png' });
+  console.log('ok   advance flow done');
+  await b.close();
+})().catch((e) => { console.error('ADV UI FAIL', e); process.exit(1); });

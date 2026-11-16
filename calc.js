@@ -14,7 +14,7 @@ const CATEGORIES = [
 const n = (v) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const round2 = (v) => Math.round(v * 100) / 100;
 
-function computeObject(object, members, entries) {
+function computeObject(object, members, entries, advances = []) {
   const invested = {};
   for (const m of members) invested[m.user_id] = 0;
 
@@ -58,12 +58,25 @@ function computeObject(object, members, entries) {
     }
   }
 
+  // Аванс покупателя: если покупатель отказался и аванс остался — это доход.
+  // Деньги на руках у того, кто получил аванс — во взаиморасчёте он делится ими с остальными по долям.
+  let advanceKept = 0;
+  let advanceActive = 0;
+  const heldCash = {};
+  for (const a of advances) {
+    const amount = n(a.amount);
+    if (a.status === 'kept') {
+      advanceKept += amount;
+      heldCash[a.user_id] = (heldCash[a.user_id] || 0) + amount;
+    } else if (a.status === 'active') advanceActive += amount;
+  }
+
   const categories = Object.values(cats).sort(
     (a, b) => idx(a.category) - idx(b.category)
   );
   const forecastCosts = categories.reduce((s, c) => s + Math.max(c.plan, c.fact), 0);
   const salePrice = object.sale_price === null || object.sale_price === undefined ? null : n(object.sale_price);
-  const profit = salePrice === null ? null : salePrice - forecastCosts;
+  const profit = salePrice === null ? null : salePrice - forecastCosts + advanceKept;
   const totalInvested = Object.values(invested).reduce((s, v) => s + v, 0);
 
   // Распределение прибыли: сначала прораб(ы), остаток — инвесторам по долям.
@@ -89,14 +102,16 @@ function computeObject(object, members, entries) {
     }
   }
 
-  // Взаиморасчёт: все вложенные деньги делятся между инвесторами по долям.
+  // Взаиморасчёт: все вложенные деньги (минус аванс, оставшийся на руках) делятся между инвесторами по долям.
   // Кто вложил больше своей доли — получает, кто меньше — доплачивает.
   const settlement = [];
-  if (shareSum > 0 && totalInvested > 0) {
+  const net = (uid) => (invested[uid] || 0) - (heldCash[uid] || 0);
+  const totalNet = totalInvested - advanceKept;
+  if (shareSum > 0 && (totalInvested > 0 || advanceKept > 0)) {
     const bal = [];
     for (const m of members) {
-      const target = m.role === 'investor' ? (totalInvested * n(m.share_pct)) / shareSum : 0;
-      const diff = round2((invested[m.user_id] || 0) - target);
+      const target = m.role === 'investor' ? (totalNet * n(m.share_pct)) / shareSum : 0;
+      const diff = round2(net(m.user_id) - target);
       if (Math.abs(diff) >= 1) bal.push({ user_id: m.user_id, diff });
     }
     const debtors = bal.filter((b) => b.diff < 0).map((b) => ({ ...b, diff: -b.diff }));
@@ -122,6 +137,8 @@ function computeObject(object, members, entries) {
     poolBalance: round2(totalIn - poolSpent),
     factTotal: round2(factTotal),
     planTotal: round2(planTotal),
+    advanceKept: round2(advanceKept),
+    advanceActive: round2(advanceActive),
     categories,
     forecastCosts: round2(forecastCosts),
     salePrice,

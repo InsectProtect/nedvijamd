@@ -286,6 +286,7 @@ async function viewHome() {
           <span style="display:flex">${o.people.slice(0, 5).map((p) => avatar(p.user_id, p.name, 'sm')).join('')}</span>
           <span class="muted" style="font-size:12px">${roleLine(o)}</span>
         </div>
+        ${o.advance ? `<div style="font-size:12px;margin-top:6px"><span class="muted">Аванс ${money(o.advance.amount)} · </span><span class="${daysClass(o.advance.days_left)}">${daysLabel(o.advance.days_left)}</span></div>` : ''}
         ${o.installment ? `<div class="muted" style="font-size:12px;margin-top:6px">Рассрочка: осталось <span class="num" style="color:var(--text)">${money(o.installment.left)}</span></div>` : ''}
       </div>
       <div style="text-align:right;white-space:nowrap;flex:none">
@@ -471,16 +472,16 @@ async function viewContract(id) {
 }
 
 // Подпись пальцем
-function openSignPad(onDone) {
+function openSignPad(onDone, opts = {}) {
   const v = document.createElement('div');
   v.className = 'viewer sign-pad';
   v.setAttribute('role', 'dialog');
   v.setAttribute('aria-label', 'Подпись');
   v.innerHTML = `
-    <div class="top"><button class="icon-btn" data-close aria-label="Закрыть">${I.close}</button><div style="font-weight:600">Ваша подпись</div><button class="link-btn" data-clear>Очистить</button></div>
+    <div class="top"><button class="icon-btn" data-close aria-label="Закрыть">${I.close}</button><div style="font-weight:600;text-align:center" ${opts.title ? 'data-nt' : ''}>${esc(opts.title || 'Ваша подпись')}</div><button class="link-btn" data-clear>Очистить</button></div>
     <div style="padding:0 16px"><div class="muted" style="font-size:13px;margin-bottom:10px">Распишитесь пальцем в рамке</div>
       <canvas aria-label="Поле для подписи"></canvas>
-      <label class="agree"><input type="checkbox" data-agree> <span>Я прочитал договор и согласен с его условиями. Am citit Acordul și sunt de acord.</span></label>
+      <label class="agree"><input type="checkbox" data-agree> <span ${opts.agree ? 'data-nt' : ''}>${esc(opts.agree || 'Я прочитал договор и согласен с его условиями. Am citit Acordul și sunt de acord.')}</span></label>
       <button class="btn" data-ok disabled>Подписать</button></div>`;
   document.body.appendChild(v);
   const c = v.querySelector('canvas');
@@ -699,6 +700,174 @@ function memberLine(m) {
   return '<span class="muted">просмотр</span>';
 }
 
+// Срок аванса: сколько дней осталось
+const daysLabel = (n) => n < 0 ? `срок истёк ${Math.abs(n)} ${plural(Math.abs(n), 'день', 'дня', 'дней')} назад` : n === 0 ? 'истекает сегодня' : `осталось ${n} ${plural(n, 'день', 'дня', 'дней')}`;
+const daysClass = (n) => (n < 0 ? 'red' : n <= 3 ? 'red' : n <= 7 ? 'gold' : 'okc');
+const ADV_STATUS = { applied: 'зачтён в цену продажи', kept: 'остался у нас · в прибыль', returned: 'возвращён покупателю' };
+
+function advanceBlock(d, id) {
+  const list = d.advances || [];
+  const active = list.filter((a) => a.status === 'active');
+  const closed = list.filter((a) => a.status !== 'active');
+  const canAdd = d.me.role === 'investor';
+  const activeCards = active.map((a) => `
+    <div class="card adv ${a.days_left < 0 ? 'expired' : ''}" style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Аванс от покупателя${a.buyer ? ` · ${esc(a.buyer)}` : ''}</span><span class="${daysClass(a.days_left)}" style="font-size:12px;font-weight:600">${daysLabel(a.days_left)}</span></div>
+      <div class="display num" style="font-weight:600;font-size:26px;margin-top:6px">${money(a.amount)}</div>
+      <div class="muted" style="font-size:12px;margin-top:4px">Получил ${esc(a.author)} · ${dateRu(a.received_date)} · действует до <b style="color:var(--text)">${dateRu(a.valid_until)}</b></div>
+      ${a.note ? `<div class="muted" style="font-size:12px;margin-top:4px">«${esc(a.note)}»</div>` : ''}
+      <a class="btn ghost sm" href="#/adv/${a.id}" style="margin-top:12px;width:100%">Договор аванса · RO / RU</a>
+      ${a.days_left < 0 ? '<div class="warn">Срок аванса истёк. Отметьте, что с ним: сделка состоялась, аванс остаётся у вас или его вернули.</div>' : ''}
+      ${a.can_close ? `<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button class="btn sm" data-adv="${a.id}" data-st="applied" style="width:100%">Сделка состоялась</button>
+        <div class="btn-row" style="margin-top:0"><button class="btn ghost sm" data-adv="${a.id}" data-st="kept" style="flex:1">Покупатель отказался — аванс наш</button></div>
+        <button class="link-btn" data-adv="${a.id}" data-st="returned" style="color:var(--muted)">Вернули покупателю</button></div>` : ''}
+    </div>`).join('');
+  const history = closed.length ? `<details class="card fold" data-fold="adv-${id}" style="margin-top:10px" ${foldOpen('adv-' + id, false) ? 'open' : ''}>
+      <summary><div style="flex:1"><div class="muted" style="font-size:13px">История авансов · ${closed.length}</div>${d.calc.advanceKept ? `<div style="font-size:13px;margin-top:2px">в прибыль: <b class="okc num">+${fmt(d.calc.advanceKept)}\u00A0€</b></div>` : ''}</div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+      <div class="rows">${closed.map((a) => `<a class="row" href="#/adv/${a.id}" style="padding:9px 0;color:var(--text)"><div class="grow"><div class="t" style="font-size:14px">${money(a.amount)}${a.buyer ? ` · ${esc(a.buyer)}` : ''}</div><div class="s">${dateRu(a.received_date)} · ${ADV_STATUS[a.status]}</div></div>${a.status === 'kept' ? `<span class="okc num" style="font-size:13px">+${fmt(a.amount)}\u00A0€</span>` : ''}</a>`).join('')}</div></details>` : '';
+  const addBtn = canAdd && !active.length ? `<a class="btn ghost sm" href="#/o/${id}/advance" style="margin-top:10px;width:100%">${I.plusSm}Аванс от покупателя</a>` : '';
+  return activeCards + history + addBtn;
+}
+
+// Данные покупателя для договора аванса
+function advDetailsForm(a, open = false) {
+  return `<details class="card fold" data-fold="adv-form" style="margin-top:16px" ${open || foldOpen('adv-form', false) ? 'open' : ''}>
+    <summary><div style="flex:1"><div style="font-weight:500">Данные для договора аванса</div><div class="muted" style="font-size:12px;margin-top:2px">Покупатель, цена, условия · можно заполнить позже</div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+    <label class="label" for="b_idnp" style="margin-top:0">IDNP покупателя</label><input class="field" id="b_idnp" inputmode="numeric" maxlength="13" value="${esc(a.buyer_idnp || '')}">
+    <label class="label" for="b_addr">Адрес покупателя</label><input class="field" id="b_addr" value="${esc(a.buyer_address || '')}" placeholder="Город, улица, дом, квартира">
+    <label class="label" for="b_phone">Телефон покупателя</label><input class="field" id="b_phone" type="tel" inputmode="tel" value="${esc(a.buyer_phone || '')}" placeholder="+373 …">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+      <div><label class="label" for="b_price">Цена продажи, €</label><input class="field" id="b_price" inputmode="decimal" value="${esc(a.sale_price ?? '')}"></div>
+      <div><label class="label" for="b_city">Город</label><input class="field" id="b_city" value="${esc(a.city || '')}" placeholder="mun. Chișinău"></div>
+    </div>
+    <span class="label">Если продавец откажется, вернуть аванс</span>
+    <div class="seg" style="grid-template-columns:1fr 1fr"><button type="button" data-ret="double" class="${a.return_mode !== 'single' ? 'on' : ''}">В двойном размере</button><button type="button" data-ret="single" class="${a.return_mode === 'single' ? 'on' : ''}">В том же размере</button></div>
+  </details>`;
+}
+function advDetailsValues() {
+  const v = (s) => (app.querySelector(s) ? app.querySelector(s).value : '');
+  const ret = app.querySelector('[data-ret].on');
+  return { buyer_idnp: v('#b_idnp'), buyer_address: v('#b_addr'), buyer_phone: v('#b_phone'), sale_price: v('#b_price').replace(/\s/g, '').replace(',', '.'), city: v('#b_city'), return_mode: ret ? ret.dataset.ret : 'double' };
+}
+function bindAdvDetails() {
+  on('[data-ret]', 'click', (e) => app.querySelectorAll('[data-ret]').forEach((b) => b.classList.toggle('on', b === e.currentTarget)));
+}
+
+async function viewAdvContract(aid) {
+  const d = await api('GET', `/api/advances/${aid}`);
+  const a = d.advance;
+  const sig = d.signatures;
+  const both = sig.seller && sig.buyer;
+  const timeRu = (iso) => { const x = new Date(iso); return `${dateRu(x.toISOString().slice(0, 10))}, ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+  const line = (label, name, s) => `<div class="row" style="padding:10px 0"><div class="grow"><div class="muted" style="font-size:12px">${label}</div><div class="t" style="font-size:14px">${esc(name || '—')}</div></div>${s ? `<span class="signed-pill">${I.check}Подписал · ${timeRu(s.signed_at)}</span>` : '<span class="muted" style="font-size:12px">ждём подписи</span>'}</div>`;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(`#/o/${a.object_id}`)}<div class="title"><b>Договор аванса</b><small>Contract de arvună · RO / RU</small></div><div class="spacer44"></div></div>
+      <div class="card ${both ? 'green' : 'gold'}" style="margin-top:18px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:15px">${both ? 'Подписан обеими сторонами' : 'Подписи'}</b><span class="num" style="font-size:13px">${money(a.amount)}</span></div>
+        <div class="rows" style="margin-top:6px">${line('Продавец', a.seller, sig.seller)}${line('Покупатель', a.buyer, sig.buyer)}</div>
+        ${d.can_sign_seller ? '<button class="btn" id="sgSeller" style="margin-top:12px">Подписать как продавец</button>' : ''}
+        ${d.can_collect_buyer ? `<button class="btn ${d.can_sign_seller ? 'ghost' : ''}" id="sgBuyer" style="margin-top:10px">Дать подписать покупателю</button>` : ''}
+        ${d.can_collect_buyer && !a.buyer ? '<div class="muted" style="font-size:12px;margin-top:8px">Сначала укажите имя покупателя ниже.</div>' : ''}
+      </div>
+      ${d.can_edit ? `<form id="advf" novalidate>
+        <label class="label" for="buyer">Покупатель</label><input class="field" id="buyer" value="${esc(a.buyer || '')}" placeholder="Имя и фамилия покупателя">
+        <label class="label" for="until">Действует до</label><input class="field" id="until" type="date" value="${esc(a.valid_until)}">
+        ${advDetailsForm(a, !a.buyer_idnp)}
+        <button class="btn ghost sm" style="margin-top:12px;width:100%">Сохранить данные</button></form>` : '<div class="muted" style="font-size:12px;margin-top:12px">После первой подписи данные договора менять нельзя.</div>'}
+      <details class="fold" data-fold="adv-text" style="margin-top:18px" open>
+        <summary><span class="muted" style="font-size:13px;flex:1">Текст договора · Limba de stat / Русский</span><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+        <iframe id="doc" title="Contract de arvună" style="width:100%;height:70vh;border:0;border-radius:16px;background:#E9E7E1"></iframe>
+      </details>
+      <div class="btn-row"><button class="btn ghost" id="print" style="flex:1">Распечатать / PDF</button><button class="btn ghost" id="shareBuyer" style="flex:1">Ссылка покупателю</button></div>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Договор на двух языках: слева румынский, справа русский. Покупатель расписывается пальцем на вашем телефоне или получает ссылку на договор. Это шаблон — при необходимости покажите его юристу или нотариусу.</div>
+    </div>`;
+  bindFolds();
+  bindAdvDetails();
+  const frame = app.querySelector('#doc');
+  frame.srcdoc = d.html;
+  const link = async () => (await api('POST', `/api/advances/${aid}/contract-link`)).url;
+  app.querySelector('#print').onclick = async () => {
+    if (TG) { try { openExternal(await link()); } catch (ex) { toast(ex.message); } }
+    else { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { window.print(); } }
+  };
+  app.querySelector('#shareBuyer').onclick = async () => {
+    try {
+      const url = await link();
+      const text = `Contract de arvună / Договор задатка — ${a.buyer || ''}`;
+      if (TG) openExternal(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+      else if (navigator.share) navigator.share({ title: text, url }).catch(() => {});
+      else { await navigator.clipboard.writeText(url); toast('Ссылка скопирована', true); }
+    } catch (ex) { toast(ex.message); }
+  };
+  const f = app.querySelector('#advf');
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('PATCH', `/api/advances/${aid}`, { buyer: app.querySelector('#buyer').value, valid_until: app.querySelector('#until').value, ...advDetailsValues() }); toast('Сохранено', true); viewAdvContract(aid); } catch (ex) { toast(ex.message); }
+  };
+  const sign = (party) => openSignPad(async (png) => {
+    await api('POST', `/api/advances/${aid}/sign`, { party, signature: png, agree: true });
+    delete state.cache[a.object_id];
+    toast('Подписано', true);
+    viewAdvContract(aid);
+  }, party === 'buyer'
+    ? { title: `Semnătura cumpărătorului / Подпись покупателя: ${a.buyer || ''}`, agree: 'Am citit contractul și sunt de acord cu condițiile lui. / Я прочитал договор и согласен с его условиями.' }
+    : { agree: 'Я прочитал договор и согласен с его условиями. / Am citit contractul și sunt de acord.' });
+  const ss = app.querySelector('#sgSeller');
+  if (ss) ss.onclick = () => sign('seller');
+  const sb = app.querySelector('#sgBuyer');
+  if (sb) sb.onclick = () => { if (!a.buyer) { toast('Укажите имя покупателя'); return; } sign('buyer'); };
+}
+
+async function viewAdvance(id) {
+  const d = state.cache[id] || (await api('GET', `/api/objects/${id}`));
+  const plusDays = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return new Date(x - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(`#/o/${id}`, 'Закрыть')}<div class="title"><b>Аванс от покупателя</b><small>${esc(d.object.name)}</small></div><div class="spacer44"></div></div>
+      <div style="text-align:center;margin-top:22px">
+        <label for="amt" class="muted" style="font-size:13px">Сумма аванса, €</label>
+        <input id="amt" class="amount-input" inputmode="decimal" placeholder="0" autocomplete="off">
+      </div>
+      <span class="label">Кто получил</span>
+      <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px">${avatar(state.me.id, state.me.name)}
+        <div style="flex:1"><div style="font-weight:500">${esc(state.me.name)} <span class="muted" style="font-weight:400">· вы</span></div><div class="muted" style="font-size:12px;margin-top:2px">Деньги у вас на руках — это будет видно партнёрам</div></div></div>
+      <label class="label" for="buyer">Покупатель</label>
+      <input class="field" id="buyer" placeholder="Имя покупателя (необязательно)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+        <div><label class="label" for="rec">Дата получения</label><input class="field" id="rec" type="date" value="${today()}"></div>
+        <div><label class="label" for="until">Действует до</label><input class="field" id="until" type="date" value="${plusDays(14)}"></div>
+      </div>
+      <div class="chips" style="margin-top:10px">${[7, 14, 30, 60].map((n) => `<button data-days="${n}">${n} дней</button>`).join('')}</div>
+      <label class="label" for="note">Комментарий</label>
+      <input class="field" id="note" placeholder="Например: до подписания у нотариуса">
+      ${advDetailsForm({ sale_price: d.object.sale_price, city: '' })}
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:12px">Если покупатель откажется и аванс останется у вас, он пойдёт в прибыль и разделится по долям. Если сделка состоится — аванс зачтётся в цену продажи.</div>
+      <button class="btn" id="save" style="margin-top:24px">Сохранить</button>
+    </div>`;
+  bindFolds();
+  bindAdvDetails();
+  on('[data-days]', 'click', (e) => {
+    const base = new Date(app.querySelector('#rec').value || today());
+    base.setDate(base.getDate() + Number(e.currentTarget.dataset.days));
+    app.querySelector('#until').value = base.toISOString().slice(0, 10);
+  });
+  app.querySelector('#save').onclick = async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      await api('POST', `/api/objects/${id}/advances`, {
+        amount: app.querySelector('#amt').value.replace(/\s/g, '').replace(',', '.'),
+        buyer: app.querySelector('#buyer').value, received_date: app.querySelector('#rec').value,
+        valid_until: app.querySelector('#until').value, note: app.querySelector('#note').value, ...advDetailsValues()
+      });
+      delete state.cache[id];
+      toast('Аванс сохранён', true);
+      go(`#/o/${id}`);
+    } catch (ex) { toast(ex.message); e.currentTarget.disabled = false; }
+  };
+}
+
 async function viewObject(id, filter = 'all') {
   const d = await api('GET', `/api/objects/${id}`);
   state.cache[id] = d;
@@ -759,6 +928,7 @@ async function viewObject(id, filter = 'all') {
           </div>
           <a class="link-btn" href="#/o/${id}/forecast" style="display:block;margin-top:6px">Все расходы по статьям →</a></details>`;
       })() : ''}
+      ${advanceBlock(d, id)}
       <div class="stats">
         <div class="stat"><div class="k">Вложено</div><div class="v">${fmt(c.totalInvested)}</div></div>
         <div class="stat"><div class="k">Затраты · факт</div><div class="v gold">${fmt(c.factTotal)}</div></div>
@@ -820,6 +990,12 @@ async function viewObject(id, filter = 'all') {
     </div>
     ${tabbar('', me.canAdd ? `#/o/${id}/add` : null)}`;
   on('[data-f]', 'click', (e) => viewObject(id, e.currentTarget.dataset.f));
+  on('[data-adv]', 'click', async (e) => {
+    const st = e.currentTarget.dataset.st;
+    const q = { applied: 'Отметить, что сделка состоялась и аванс зачтён в цену продажи?', kept: 'Покупатель отказался и аванс остаётся у вас? Сумма пойдёт в прибыль и разделится по долям.', returned: 'Отметить, что аванс вернули покупателю?' }[st];
+    if (!ask(q)) return;
+    try { await api('POST', `/api/advances/${e.currentTarget.dataset.adv}/status`, { status: st }); toast('Сохранено', true); viewObject(id, filter); } catch (ex) { toast(ex.message); }
+  });
   bindFolds();
 }
 
@@ -1016,6 +1192,8 @@ async function viewForecast(id) {
       ${c.profit !== null ? `<div class="card gold" style="margin-top:10px">
         <div style="display:flex;justify-content:space-between;font-size:12px;color:#B8A98A"><span>Ориентировочная прибыль</span>${c.roi !== null ? `<span>${pct(c.roi)} на затраты</span>` : ''}</div>
         <div class="display num" style="font-weight:600;font-size:30px;margin-top:6px;color:${c.profit >= 0 ? 'var(--gold)' : 'var(--red)'}">${signed(c.profit)} €</div>
+        ${c.advanceKept ? `<div style="font-size:12px;color:#B8A98A;margin-top:4px">в т.ч. аванс, оставшийся у нас: <b class="okc">+${fmt(c.advanceKept)}\u00A0€</b></div>` : ''}
+        ${c.advanceActive ? `<div style="font-size:12px;color:#B8A98A;margin-top:4px">действующий аванс покупателя: ${money(c.advanceActive)}</div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #3A3428">${dist}</div>
         ${c.shareSum !== 100 ? '<div class="red" style="font-size:12px;margin-top:10px">Доли инвесторов не равны 100 % — создатель должен их поправить.</div>' : ''}
       </div>` : ''}
@@ -1226,6 +1404,8 @@ const routes = [
   [/^#\/o\/(\d+)\/edit$/, (m) => viewObjectForm(m[1])],
   [/^#\/o\/(\d+)\/add(?:\/(\w+))?$/, (m) => viewAdd(m[1], m[2])],
   [/^#\/o\/(\d+)\/forecast$/, (m) => viewForecast(m[1])],
+  [/^#\/o\/(\d+)\/advance$/, (m) => viewAdvance(m[1])],
+  [/^#\/adv\/(\d+)$/, (m) => viewAdvContract(m[1])],
   [/^#\/o\/(\d+)\/members$/, (m) => viewMembers(m[1])],
   [/^#\/o\/(\d+)\/shares$/, (m) => viewShares(m[1])],
   [/^#\/o\/(\d+)\/delete$/, (m) => viewDelete(m[1])],

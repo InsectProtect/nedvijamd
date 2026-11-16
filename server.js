@@ -6,6 +6,7 @@ const db = require('./db');
 const { computeObject, CATEGORIES } = require('./calc');
 const tg = require('./tg');
 const { buildContract, makeSnapshot, termsHash } = require('./contract');
+const { buildAdvanceContract } = require('./advance_contract');
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
@@ -193,7 +194,13 @@ async function loadObject(objectId) {
      WHERE e.object_id = $1 ORDER BY e.entry_date DESC, e.id DESC`,
     [objectId]
   );
-  return { object, members, entries };
+  const advances = await db.query(
+    `SELECT a.id, a.user_id, u.name AS author, a.buyer, a.amount, to_char(a.received_date, 'YYYY-MM-DD') AS received_date,
+            to_char(a.valid_until, 'YYYY-MM-DD') AS valid_until, a.status, a.note, (a.valid_until - current_date) AS days_left
+     FROM advances a JOIN users u ON u.id = a.user_id WHERE a.object_id = $1 ORDER BY a.id DESC`,
+    [objectId]
+  );
+  return { object, members, entries, advances };
 }
 
 function memberView(m, calc) {
@@ -449,8 +456,8 @@ route('GET', '/api/objects', async ({ user }) => {
   let myProfit = 0;
   const partners = new Set();
   for (const r of rows) {
-    const { object, members, entries } = await loadObject(r.id);
-    const calc = computeObject(object, members, entries);
+    const { object, members, entries, advances } = await loadObject(r.id);
+    const calc = computeObject(object, members, entries, advances);
     const me = members.find((m) => Number(m.user_id) === Number(user.id));
     members.forEach((m) => Number(m.user_id) !== Number(user.id) && partners.add(Number(m.user_id)));
     const mine = calc.invested[user.id] || 0;
@@ -472,6 +479,7 @@ route('GET', '/api/objects', async ({ user }) => {
       my_invested: mine,
       my_profit: typeof myPayout === 'number' ? myPayout : null,
       has_forecast: calc.profit !== null,
+      advance: (() => { const act = advances.find((x) => x.status === 'active'); return act ? { amount: Number(act.amount), valid_until: act.valid_until, days_left: Number(act.days_left) } : null; })(),
       delete_requested: !!object.delete_requested_at
     });
   }
@@ -501,8 +509,8 @@ route('POST', '/api/objects', async ({ user, body }) => {
 
 route('GET', '/api/objects/:id', async ({ user, params }) => {
   const me = await membership(params.id, user.id);
-  const { object, members, entries } = await loadObject(params.id);
-  const calc = computeObject(object, members, entries);
+  const { object, members, entries, advances } = await loadObject(params.id);
+  const calc = computeObject(object, members, entries, advances);
   const names = Object.fromEntries(members.map((m) => [m.user_id, m.name]));
   return {
     object: {
@@ -547,15 +555,164 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
     })),
     calc: { ...calc, invested: undefined, payout: undefined,
       settlement: calc.settlement.map((s) => ({ ...s, fromName: names[s.from], toName: names[s.to] })) },
+    advances: advances.map(advanceView(user, me)),
     categories: CATEGORIES
   };
+});
+
+const advanceView = (user, me) => (a) => ({
+  id: Number(a.id), user_id: Number(a.user_id), author: a.author, buyer: a.buyer, amount: Number(a.amount),
+  received_date: a.received_date, valid_until: a.valid_until, status: a.status, note: a.note,
+  days_left: Number(a.days_left),
+  can_close: a.status === 'active' && (Number(a.user_id) === Number(user.id) || me.isCreator)
+});
+
+// Аванс от покупателя: вносит тот, кто получил деньги
+route('POST', '/api/objects/:id/advances', async ({ user, params, body }) => {
+  const me = await membership(params.id, user.id);
+  if (me.role !== 'investor') fail(403, 'Аванс вносит инвестор, который его получил');
+  const amount = positiveAmount(body.amount);
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(body.valid_until || '') ? body.valid_until : fail(400, 'Укажите, до какого числа действует аванс');
+  const received = /^\d{4}-\d{2}-\d{2}$/.test(body.received_date || '') ? body.received_date : null;
+  const sp = num(body.sale_price);
+  const a = await db.one(
+    `INSERT INTO advances (object_id, user_id, buyer, amount, received_date, valid_until, note, buyer_idnp, buyer_address, buyer_phone, sale_price, return_mode, city)
+     VALUES ($1, $2, $3, $4, COALESCE($5::date, current_date), $6::date, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    [params.id, user.id, str(body.buyer, 120) || null, amount, received, until, str(body.note, 300) || null,
+      str(body.buyer_idnp, 20) || null, str(body.buyer_address, 300) || null, str(body.buyer_phone, 30) || null,
+      Number.isFinite(sp) && sp > 0 ? sp : null, body.return_mode === 'single' ? 'single' : 'double', str(body.city, 80) || null]
+  );
+  const oname = tg.escHtml(await objectName(params.id));
+  const [y, m, d] = until.split('-');
+  notifyObject(params.id, user.id, (lang) => lang === 'ro'
+    ? `💶 <b>${oname}</b>\n${tg.escHtml(user.name)} a primit un avans de la cumpărător: <b>${fmtEur(amount)}</b>, valabil până la ${d}.${m}.${y}.`
+    : `💶 <b>${oname}</b>\n${tg.escHtml(user.name)} получил аванс от покупателя: <b>${fmtEur(amount)}</b>, действует до ${d}.${m}.${y}.`,
+    `/o/${params.id}`);
+  return { id: a.id };
+});
+
+// ---------- договор аванса с покупателем ----------
+
+async function loadAdvance(id, user) {
+  const a = await db.one(
+    `SELECT a.*, to_char(a.received_date, 'YYYY-MM-DD') AS received_date, to_char(a.valid_until, 'YYYY-MM-DD') AS valid_until
+     FROM advances a WHERE a.id = $1`,
+    [id]
+  );
+  if (!a) fail(404, 'Аванс не найден');
+  const me = await membership(a.object_id, user.id);
+  return { a, me, canEdit: Number(a.user_id) === Number(user.id) || me.isCreator };
+}
+
+async function advanceHtml(a, printable) {
+  const o = await db.one('SELECT id, name, area, contract_fields FROM objects WHERE id = $1', [a.object_id]);
+  const u = await db.one('SELECT name, idnp, address FROM users WHERE id = $1', [a.user_id]);
+  const pd = await personalDataOn();
+  const sigRows = await db.query(`SELECT party, name, encode(signature, 'base64') AS image, signed_at FROM advance_signatures WHERE advance_id = $1`, [a.id]);
+  const signatures = Object.fromEntries(sigRows.map((r) => [r.party, { image: r.image, name: r.name, signed_at: r.signed_at }]));
+  const fields = typeof o.contract_fields === 'string' ? JSON.parse(o.contract_fields) : o.contract_fields || {};
+  return {
+    html: buildAdvanceContract({
+      adv: { ...a, amount: Number(a.amount), sale_price: a.sale_price === null ? null : Number(a.sale_price) },
+      object: { name: o.name, area: o.area === null ? null : Number(o.area) },
+      fields,
+      seller: { name: u.name, idnp: pd ? u.idnp : null, address: pd ? u.address : null },
+      signatures,
+      printable
+    }),
+    signatures: Object.fromEntries(Object.entries(signatures).map(([k, v]) => [k, { name: v.name, signed_at: v.signed_at }]))
+  };
+}
+
+route('GET', '/api/advances/:id', async ({ user, params }) => {
+  const { a, canEdit } = await loadAdvance(params.id, user);
+  const { html, signatures } = await advanceHtml(a, false);
+  const seller = await db.one('SELECT name FROM users WHERE id = $1', [a.user_id]);
+  return {
+    advance: {
+      id: a.id, object_id: a.object_id, user_id: Number(a.user_id), seller: seller.name, buyer: a.buyer, buyer_idnp: a.buyer_idnp, buyer_address: a.buyer_address,
+      buyer_phone: a.buyer_phone, amount: Number(a.amount), sale_price: a.sale_price === null ? null : Number(a.sale_price),
+      received_date: a.received_date, valid_until: a.valid_until, return_mode: a.return_mode, city: a.city, status: a.status, note: a.note
+    },
+    html, signatures,
+    can_edit: canEdit && !Object.keys(signatures).length,
+    can_sign_seller: Number(a.user_id) === Number(user.id) && !signatures.seller,
+    can_collect_buyer: canEdit && !signatures.buyer
+  };
+});
+
+route('PATCH', '/api/advances/:id', async ({ user, params, body }) => {
+  const { a, canEdit } = await loadAdvance(params.id, user);
+  if (!canEdit) fail(403, 'Изменить аванс может тот, кто его получил, или создатель объекта');
+  const signed = await db.one('SELECT count(*) AS c FROM advance_signatures WHERE advance_id = $1', [a.id]);
+  if (Number(signed.c) > 0) fail(400, 'Договор уже подписан — данные менять нельзя');
+  const sp = num(body.sale_price);
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(body.valid_until || '') ? body.valid_until : a.valid_until;
+  await db.query(
+    `UPDATE advances SET buyer = $1, buyer_idnp = $2, buyer_address = $3, buyer_phone = $4, sale_price = $5, return_mode = $6, city = $7, valid_until = $8::date WHERE id = $9`,
+    [str(body.buyer, 120) || null, str(body.buyer_idnp, 20) || null, str(body.buyer_address, 300) || null, str(body.buyer_phone, 30) || null,
+      Number.isFinite(sp) && sp > 0 ? sp : null, body.return_mode === 'single' ? 'single' : 'double', str(body.city, 80) || null, until, a.id]
+  );
+  return { ok: true };
+});
+
+route('POST', '/api/advances/:id/sign', async ({ user, params, body }) => {
+  const { a, canEdit } = await loadAdvance(params.id, user);
+  const party = body.party === 'buyer' ? 'buyer' : 'seller';
+  if (party === 'seller' && Number(a.user_id) !== Number(user.id)) fail(403, 'Как продавец подписывает тот, кто получил аванс');
+  if (party === 'buyer' && !canEdit) fail(403, 'Подпись покупателя собирает тот, кто получил аванс');
+  if (party === 'buyer' && !a.buyer) fail(400, 'Укажите имя покупателя');
+  if (body.agree !== true) fail(400, 'Подтвердите, что прочитали договор');
+  const img = String(body.signature || '').replace(/^data:image\/png;base64,/, '');
+  const buf = Buffer.from(img, 'base64');
+  if (buf.length < 200 || buf.length > 400 * 1024 || buf.readUInt32BE(0) !== 0x89504e47) fail(400, 'Подпись не распознана — распишитесь ещё раз');
+  const name = party === 'seller' ? user.name : a.buyer;
+  await db.query(
+    `INSERT INTO advance_signatures (advance_id, party, name, signature) VALUES ($1, $2, $3, decode($4, 'base64')) ON CONFLICT (advance_id, party) DO NOTHING`,
+    [a.id, party, name, buf.toString('base64')]
+  );
+  const rows = await db.query('SELECT party FROM advance_signatures WHERE advance_id = $1', [a.id]);
+  if (rows.length === 2) {
+    const oname = tg.escHtml(await objectName(a.object_id));
+    notifyObject(a.object_id, user.id, (lang) => lang === 'ro'
+      ? `✍️ <b>${oname}</b>\nContractul de arvună cu cumpărătorul ${tg.escHtml(a.buyer || '')} (${fmtEur(a.amount)}) a fost semnat de ambele părți.`
+      : `✍️ <b>${oname}</b>\nДоговор аванса с покупателем ${tg.escHtml(a.buyer || '')} (${fmtEur(a.amount)}) подписан обеими сторонами.`,
+      `/adv/${a.id}`);
+  }
+  return { signed: rows.map((r) => r.party) };
+});
+
+route('POST', '/api/advances/:id/contract-link', async ({ user, params }) => {
+  const { a } = await loadAdvance(params.id, user);
+  const t = token(24);
+  await db.query(`INSERT INTO advance_links (token, advance_id, expires_at) VALUES ($1, $2, now() + interval '7 days')`, [t, a.id]);
+  return { url: `${PUBLIC_URL}/a/${t}` };
+});
+
+// Закрыть аванс: сделка состоялась / остался у нас / вернули
+route('POST', '/api/advances/:id/status', async ({ user, params, body }) => {
+  const a = await db.one('SELECT id, object_id, user_id, amount, status FROM advances WHERE id = $1', [params.id]);
+  if (!a) fail(404, 'Аванс не найден');
+  const me = await membership(a.object_id, user.id);
+  if (Number(a.user_id) !== Number(user.id) && !me.isCreator) fail(403, 'Изменить аванс может тот, кто его получил, или создатель объекта');
+  if (a.status !== 'active') fail(400, 'Аванс уже закрыт');
+  const status = ['applied', 'kept', 'returned'].includes(body.status) ? body.status : fail(400, 'Неизвестный статус');
+  await db.query('UPDATE advances SET status = $1, closed_at = now() WHERE id = $2', [status, a.id]);
+  const oname = tg.escHtml(await objectName(a.object_id));
+  const what = {
+    applied: ['сделка состоялась, аванс зачтён в цену продажи', 'tranzacția a avut loc, avansul a fost inclus în prețul de vânzare'],
+    kept: ['покупатель отказался — аванс остался у нас и идёт в прибыль', 'cumpărătorul a renunțat — avansul rămâne la noi și intră în profit'],
+    returned: ['аванс возвращён покупателю', 'avansul a fost returnat cumpărătorului']
+  }[status];
+  notifyObject(a.object_id, user.id, (lang) => `💶 <b>${oname}</b>\n${lang === 'ro' ? 'Avans' : 'Аванс'} ${fmtEur(a.amount)}: ${what[lang === 'ro' ? 1 : 0]}.`, `/o/${a.object_id}`);
+  return { ok: true };
 });
 
 // ---------- договор: черновик, редакции, подписи ----------
 
 async function liveSnapshot(objectId) {
-  const { object, members, entries } = await loadObject(objectId);
-  const calc = computeObject(object, members, entries);
+  const { object, members, entries, advances } = await loadObject(objectId);
+  const calc = computeObject(object, members, entries, advances);
   return makeSnapshot({ object, members, calc, installment: installmentInfo(object, calc), repair: repairInfo(object, calc) });
 }
 
@@ -1194,6 +1351,14 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/healthz') return send(res, 200, { ok: true });
     let m;
     if (req.method === 'POST' && pathname === '/tg/webhook') return await handleWebhook(req, res);
+    if (req.method === 'GET' && (m = pathname.match(/^\/a\/([\w-]+)$/))) {
+      const link = await db.one('SELECT advance_id FROM advance_links WHERE token = $1 AND expires_at > now()', [m[1]]);
+      if (!link) { res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end('<p style="font-family:sans-serif;padding:24px">Linkul a expirat. / Ссылка устарела.</p>'); }
+      const a = await db.one(`SELECT a.*, to_char(a.received_date, 'YYYY-MM-DD') AS received_date, to_char(a.valid_until, 'YYYY-MM-DD') AS valid_until FROM advances a WHERE a.id = $1`, [link.advance_id]);
+      const { html } = await advanceHtml(a, true);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+      return res.end(html);
+    }
     if (req.method === 'GET' && (m = pathname.match(/^\/c\/([\w-]+)$/))) {
       const link = await db.one('SELECT object_id FROM contract_links WHERE token = $1 AND expires_at > now()', [m[1]]);
       if (!link) { res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end('<p style="font-family:sans-serif;padding:24px">Linkul a expirat. Deschideți contractul din nou în aplicație. / Ссылка устарела, откройте договор в приложении ещё раз.</p>'); }
