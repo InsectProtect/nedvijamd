@@ -27,7 +27,7 @@ const colorOf = (id) => PALETTE[Math.abs(Number(id) || 0) % PALETTE.length];
 const initial = (name) => esc((String(name || '?').trim()[0] || '?').toUpperCase());
 const avatar = (id, name, cls = '') => `<span class="avatar ${cls}" style="background:${colorOf(id)}">${initial(name)}</span>`;
 const ROLE = { investor: 'инвестор', foreman: 'прораб', viewer: 'просмотр' };
-const KIND = { in: 'Взнос', out: 'Расход', plan: 'План' };
+const KIND = { in: 'Взнос', out: 'Расход', plan: 'План', rent: 'Аренда' };
 const STATUSES = ['покупка', 'ремонт', 'сдаётся', 'продаётся', 'продана'];
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const dateRu = (d) => {
@@ -873,16 +873,18 @@ async function viewObject(id, filter = 'all') {
   state.cache[id] = d;
   const { object: o, calc: c, me } = d;
   const meName = (m) => esc(m.name) + (m.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : '');
-  const filters = [['all', 'Все'], ['in', 'Взносы'], ['out', 'Расходы']];
+  const filters = [['all', 'Все'], ['out', 'Расходы'], ...(d.entries.some((e) => e.kind === 'rent') ? [['rent', 'Аренда']] : []), ...(d.entries.some((e) => e.kind === 'in') ? [['in', 'Взносы']] : [])];
   const entries = d.entries.filter((e) => filter === 'all' || e.kind === filter);
   const entryRow = (e) => {
     const title = e.note || e.category || KIND[e.kind];
-    const sub = [e.kind === 'plan' ? 'план' : e.kind === 'in' ? 'взнос' : null, e.kind !== 'in' && e.note ? e.category : null, dateRu(e.entry_date)].filter(Boolean).join(' · ');
-    const amt = e.kind === 'in' ? `<span class="gold">+${fmt(e.amount)} €</span>` : e.kind === 'out' ? `−${fmt(e.amount)} €` : `<span class="muted">${fmt(e.amount)} €</span>`;
+    const sub = [e.kind === 'plan' ? 'план' : e.kind === 'in' ? 'взнос' : e.kind === 'rent' ? 'аренда' : null, e.kind === 'out' && e.note ? e.category : null, dateRu(e.entry_date)].filter(Boolean).join(' · ');
+    const amt = (e.kind === 'in' ? `<span class="gold">+${fmt(e.amount)}\u00A0€</span>` : e.kind === 'rent' ? `<span class="okc">+${fmt(e.amount)}\u00A0€</span>` : e.kind === 'out' ? `−${fmt(e.amount)}\u00A0€` : `<span class="muted">${fmt(e.amount)}\u00A0€</span>`)
+      + (e.orig_currency === 'MDL' ? `<div class="muted" style="font-size:11px">${fmt(e.orig_amount)} lei</div>` : '');
     return `<a class="row" href="#/e/${e.id}">${avatar(e.user_id, e.author)}
       <div class="grow"><div class="t" style="font-size:14px">${esc(title)}</div>
       <div class="s">${esc(sub)}${e.receipts ? ` · <span class="gold" style="display:inline-flex;align-items:center;gap:3px">${I.receipt}${e.receipts}</span>` : ''}</div>
-      ${e.delete_pending ? `<div style="margin-top:4px"><span class="badge red">${e.need_my_vote ? 'удаление · нужен ваш ответ' : 'на удалении'}</span></div>` : ''}</div>
+      ${e.delete_pending ? `<div style="margin-top:4px"><span class="badge red">${e.need_my_vote ? 'удаление · нужен ваш ответ' : 'на удалении'}</span></div>` : ''}
+      ${e.edit_pending ? `<div style="margin-top:4px"><span class="badge gold">${e.need_my_edit_vote ? 'исправление · нужен ваш ответ' : 'исправление на согласовании'}</span></div>` : ''}</div>
       <div class="r num" style="font-size:14px">${amt}</div></a>`;
   };
   app.innerHTML = `
@@ -897,7 +899,7 @@ async function viewObject(id, filter = 'all') {
       ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
       <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? (o.installment ? ` · в рассрочку за ${money(o.purchase_price)}` : ` · куплена за ${money(o.purchase_price)}`) : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
-      ${(() => { const w = d.entries.filter((e) => e.need_my_vote); return w.length ? `<a class="card gold" href="#/e/${w[0].id}" style="display:block;margin-top:14px;font-size:14px">${w.length === 1 ? 'Операция ждёт' : `${w.length} ${plural(w.length, 'операция ждёт', 'операции ждут', 'операций ждут')}`} вашего согласия на удаление →</a>` : ''; })()}
+      ${(() => { const w = d.entries.filter((e) => e.need_my_vote || e.need_my_edit_vote); return w.length ? `<a class="card gold" href="#/e/${w[0].id}" style="display:block;margin-top:14px;font-size:14px">${w.length === 1 ? 'Операция ждёт' : `${w.length} ${plural(w.length, 'операция ждёт', 'операции ждут', 'операций ждут')}`} вашего ответа: удаление или исправление →</a>` : ''; })()}
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
       ${o.installment ? (() => {
         const ins = o.installment;
@@ -935,6 +937,11 @@ async function viewObject(id, filter = 'all') {
         <div class="stat"><div class="k">Затраты · план</div><div class="v">${fmt(c.planTotal)}</div></div>
       </div>
 
+      ${c.rentTotal ? `<div class="muted" style="font-size:12px;margin-top:8px">Аренда получено: <b class="okc num">+${fmt(c.rentTotal)}\u00A0€</b> · идёт в прибыль</div>` : ''}
+      ${d.deal ? `<a class="card green" href="#/o/${id}/deal" style="display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--text)">
+        <div style="flex:1"><div style="font-size:12px;color:#8FC9A3">Сделка закрыта · ${dateRu(d.deal.sold_at)}</div>
+        <div style="font-size:15px;font-weight:500;margin-top:4px">Продано за ${money(d.deal.sold_price)} · прибыль <span class="${c.profit >= 0 ? 'okc' : 'red'} num">${signed(c.profit)}\u00A0€</span></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Выплаты: ${d.deal.transfers.filter((t) => t.paid_at).length} из ${d.deal.transfers.length}${d.deal.outdated ? ' · <span class="red">нужно пересчитать</span>' : ''}</div></div>${I.chev}</a>` : ''}
       <a class="card" href="#/o/${id}/forecast" style="display:flex;align-items:center;gap:14px;margin-top:12px;color:var(--text)">
         <div style="flex:1">${c.profit !== null
           ? `<div class="muted" style="font-size:12px">Прогноз продажи · ≈ ${money(c.salePrice)}</div>
@@ -965,6 +972,10 @@ async function viewObject(id, filter = 'all') {
         ${c.settlement.map((s) => `<div style="font-size:15px;font-weight:500;margin-top:6px">${esc(s.fromName)} → ${esc(s.toName)} · <span class="num">${money(s.amount)}</span></div>`).join('')}
       </div>` : ''}
 
+      <div class="btn-row" style="margin-top:14px">
+        <a class="btn ghost sm" href="#/o/${id}/report" style="flex:1">Отчёт · PDF / Excel</a>
+        ${me.isCreator && !d.deal ? `<a class="btn ghost sm" href="#/o/${id}/deal" style="flex:1">Закрыть сделку</a>` : ''}
+      </div>
       <div class="section-h"><h2>Операции</h2>${me.canAdd ? `<a class="pill" href="#/o/${id}/add">${I.plusSm}Добавить</a>` : ''}</div>
       <div class="chips" style="margin-bottom:6px">${filters.map(([k, l]) => `<button data-f="${k}" class="${k === filter ? 'on' : ''}">${l}</button>`).join('')}</div>
       ${entries.length ? (() => {
@@ -978,8 +989,8 @@ async function viewObject(id, filter = 'all') {
         }
         return groups.map((g, gi) => {
           const sumOut = g.items.filter((e) => e.kind === 'out').reduce((s, e) => s + e.amount, 0);
-          const sumIn = g.items.filter((e) => e.kind === 'in').reduce((s, e) => s + e.amount, 0);
-          const pending = g.items.some((e) => e.need_my_vote);
+          const sumIn = g.items.filter((e) => e.kind === 'in' || e.kind === 'rent').reduce((s, e) => s + e.amount, 0);
+          const pending = g.items.some((e) => e.need_my_vote || e.need_my_edit_vote);
           return `<details class="fold month" data-fold="m-${id}-${g.k}" ${foldOpen(`m-${id}-${g.k}`, gi === 0 || pending) ? 'open' : ''}>
             <summary><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${monthTitle(g.k)}</div>
               <div class="muted" style="font-size:12px;margin-top:2px">${g.items.length} ${plural(g.items.length, 'операция', 'операции', 'операций')}${sumOut ? ` · −${fmt(sumOut)}\u00A0€` : ''}${sumIn ? ` · +${fmt(sumIn)}\u00A0€` : ''}${pending ? ' · <span class="red">нужен ваш ответ</span>' : ''}</div></div>
@@ -999,43 +1010,90 @@ async function viewObject(id, filter = 'all') {
   bindFolds();
 }
 
+// Блок суммы: евро или леи (по курсу НБМ на дату операции)
+function amountBlock(st, label) {
+  const lei = st.currency === 'MDL';
+  const eurVal = lei && st.rate && st.amountVal ? Math.round((Number(String(st.amountVal).replace(/\s/g, '').replace(',', '.')) / st.rate) * 100) / 100 : null;
+  return `<div style="text-align:center;margin-top:22px">
+      <label for="amt" class="muted" style="font-size:13px">${label}${lei ? ', lei' : ', €'}</label>
+      <input id="amt" class="amount-input" inputmode="decimal" placeholder="0" value="${esc(st.amountVal || '')}" autocomplete="off">
+      <div class="cur-seg" role="group" aria-label="Валюта"><button type="button" data-cur="EUR" class="${lei ? '' : 'on'}" data-nt>€</button><button type="button" data-cur="MDL" class="${lei ? 'on' : ''}" data-nt>lei</button></div>
+      ${lei ? `<div class="muted" style="font-size:12px;margin-top:8px" id="leiInfo">${st.rate ? `≈ <b style="color:var(--text)" class="num">${eurVal !== null && !Number.isNaN(eurVal) ? fmt(eurVal) + ' €' : '—'}</b> · курс НБМ ${String(st.rate).replace('.', ',')}` : st.rateError ? 'Курс НБМ недоступен — укажите вручную' : 'Загружаю курс НБМ…'}</div>
+        <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:6px"><label for="rate" class="muted" style="font-size:12px">Курс, lei за 1 €</label><input id="rate" class="field" inputmode="decimal" style="width:110px;height:38px;font-size:14px;text-align:center" value="${esc(st.rate || '')}"></div>` : ''}
+      ${st.ocr ? `<div class="ocr-note ${st.ocr.err ? '' : 'ok'}">${esc(st.ocr.text)}</div>` : ''}
+    </div>`;
+}
+function bindAmount(st, redraw) {
+  const amt = app.querySelector('#amt');
+  amt.addEventListener('input', () => {
+    st.amountVal = amt.value;
+    if (st.currency === 'MDL' && st.rate) {
+      const v = Number(amt.value.replace(/\s/g, '').replace(',', '.')) / st.rate;
+      const info = app.querySelector('#leiInfo b');
+      if (info) info.textContent = Number.isFinite(v) && v > 0 ? `${fmt(Math.round(v * 100) / 100)} €` : '—';
+    }
+  });
+  const rate = app.querySelector('#rate');
+  if (rate) rate.addEventListener('input', () => {
+    const r = Number(rate.value.replace(/\s/g, '').replace(',', '.'));
+    st.rate = r > 0 ? r : null; st.rateError = false;
+    const info = app.querySelector('#leiInfo');
+    const v = Number((amt.value || '').replace(/\s/g, '').replace(',', '.'));
+    if (info) info.innerHTML = st.rate ? `≈ <b style="color:var(--text)" class="num">${v > 0 ? fmt(Math.round((v / st.rate) * 100) / 100) + ' €' : '—'}</b> · курс ${String(st.rate).replace('.', ',')}` : 'Укажите курс';
+  });
+  on('[data-cur]', 'click', async (e) => {
+    st.currency = e.currentTarget.dataset.cur;
+    redraw();
+    if (st.currency === 'MDL' && !st.rate) await loadRate(st, redraw);
+  });
+}
+async function loadRate(st, redraw) {
+  const dateEl = app.querySelector('#date');
+  try { const r = await api('GET', `/api/rate?date=${dateEl ? dateEl.value : today()}`); st.rate = r.rate; st.rateError = false; } catch { st.rateError = true; }
+  redraw();
+}
+function amountPayload(st) {
+  const raw = (app.querySelector('#amt').value || '').replace(/\s/g, '').replace(',', '.');
+  const rateEl = app.querySelector('#rate');
+  const rate = rateEl && rateEl.value ? rateEl.value.replace(/\s/g, '').replace(',', '.') : st.rate || '';
+  return st.currency === 'MDL' ? { currency: 'MDL', orig_amount: raw, rate } : { amount: raw };
+}
+
 async function viewAdd(id, presetKind) {
   const d = state.cache[id] || (await api('GET', `/api/objects/${id}`));
   if (!d.me.canAdd) { toast('Ваша роль не позволяет добавлять операции'); return go(`#/o/${id}`); }
   const foreman = d.me.role === 'foreman';
-  const kinds = foreman ? [['out', 'Расход']] : [['in', 'Взнос'], ['out', 'Расход']];
+  const kinds = foreman ? [['out', 'Расход']] : [['out', 'Расход'], ['rent', 'Аренда · доход']];
   const isPay = presetKind === 'pay' && !foreman;
   const s = {
-    kind: isPay ? 'out' : presetKind && kinds.some((k) => k[0] === presetKind) ? presetKind : 'out',
-    source: 'own',
+    kind: presetKind === 'rent' && !foreman ? 'rent' : 'out',
     category: isPay ? 'Покупка' : 'Ремонт',
-    photos: []
+    photos: [],
+    currency: 'EUR',
+    rate: null,
+    amountVal: isPay && d.object.installment && d.object.installment.monthly ? String(Math.min(d.object.installment.monthly, d.object.installment.left)) : '',
+    ocr: null
   };
   const presetNote = isPay ? 'Платёж по рассрочке' : '';
-  const presetAmount = isPay && d.object.installment && d.object.installment.monthly ? String(Math.min(d.object.installment.monthly, d.object.installment.left)) : '';
   const draw = () => {
-    const amountVal = app.querySelector('#amt') ? app.querySelector('#amt').value : presetAmount;
+    if (app.querySelector('#amt')) s.amountVal = app.querySelector('#amt').value;
     const noteVal = app.querySelector('#note') ? app.querySelector('#note').value : presetNote;
-    const dateVal = app.querySelector('#date') ? app.querySelector('#date').value : today();
-    const isIn = s.kind === 'in', isPlan = s.kind === 'plan', isOut = s.kind === 'out';
+    const dateVal = app.querySelector('#date') ? app.querySelector('#date').value : s.ocrDate || today();
+    const isRent = s.kind === 'rent', isOut = s.kind === 'out';
     app.innerHTML = `
       <div class="screen no-tab">
         <div class="topbar">${backBtn(`#/o/${id}`, 'Закрыть')}<div class="title"><b>Новая операция</b><small>${esc(d.object.name)}</small></div><div class="spacer44"></div></div>
         ${kinds.length > 1 ? `<div class="seg" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr));margin-top:20px">${kinds.map(([k, l]) => `<button data-k="${k}" class="${k === s.kind ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
-        <div style="text-align:center;margin-top:22px">
-          <label for="amt" class="muted" style="font-size:13px">${isPlan ? 'Ориентировочная сумма, €' : isOut ? 'Фактическая сумма расхода, €' : 'Сумма взноса, €'}</label>
-          <input id="amt" class="amount-input" inputmode="decimal" placeholder="0" value="${esc(amountVal)}" autocomplete="off">
-        </div>
-        ${isPlan ? `<div class="card dashed" style="font-size:13px;line-height:1.5;color:#B5B5BA;margin-top:8px">Ориентировочный расход попадёт в план и в прогноз прибыли. Когда оплатите — добавьте фактический расход с чеком, план и факт сравнятся автоматически.</div>` : `
-          <span class="label">${isIn ? 'Кто внёс' : 'Кто оплатил'}</span>
-          <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px">${avatar(state.me.id, state.me.name)}
-            <div style="flex:1"><div style="font-weight:500">${esc(state.me.name)} <span class="muted" style="font-weight:400">· вы</span></div><div class="muted" style="font-size:12px;margin-top:2px">Только свои операции, за партнёра нельзя</div></div>
-            <span class="muted" style="width:16px;height:16px;display:inline-flex" role="img" aria-label="Нельзя изменить">${I.lock}</span></div>`}
-        ${isOut ? '<div class="muted" style="font-size:12px;margin-top:8px">Оплачено из ваших денег — сумма засчитается как ваше вложение.</div>' : ''}
-        ${!isIn ? `<span class="label">Категория${foreman ? ' · прораб вносит только ремонт' : ''}</span>
+        ${amountBlock(s, isRent ? 'Получено за аренду' : 'Сумма расхода')}
+        <span class="label">${isRent ? 'Кто получил' : 'Кто оплатил'}</span>
+        <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px">${avatar(state.me.id, state.me.name)}
+          <div style="flex:1"><div style="font-weight:500">${esc(state.me.name)} <span class="muted" style="font-weight:400">· вы</span></div><div class="muted" style="font-size:12px;margin-top:2px">Только свои операции, за партнёра нельзя</div></div>
+          <span class="muted" style="width:16px;height:16px;display:inline-flex" role="img" aria-label="Нельзя изменить">${I.lock}</span></div>
+        <div class="muted" style="font-size:12px;margin-top:8px">${isRent ? 'Аренда идёт в прибыль и делится по долям. Деньги у вас на руках — это учтётся во взаиморасчёте.' : 'Оплачено из ваших денег — сумма засчитается как ваше вложение.'}</div>
+        ${isOut ? `<span class="label">Категория${foreman ? ' · прораб вносит только ремонт' : ''}</span>
           <div class="chips">${(foreman ? ['Ремонт'] : d.categories).map((c) => `<button data-c="${esc(c)}" class="${c === s.category ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>` : ''}
         <label class="label" for="note">Комментарий</label>
-        <input id="note" class="field" placeholder="${isIn ? 'Например: перевод на общий счёт' : 'Например: плитка, санузел'}" value="${esc(noteVal)}">
+        <input id="note" class="field" placeholder="${isRent ? 'Например: аренда за ноябрь' : 'Например: плитка, санузел'}" value="${esc(noteVal)}">
         <label class="label" for="date">Дата</label>
         <input id="date" class="field" type="date" value="${esc(dateVal)}">
         ${isOut ? `<div class="label" style="display:flex;justify-content:space-between"><span>Чеки и документы</span><span>${s.photos.length ? s.photos.length + ' фото' : ''}</span></div>
@@ -1043,31 +1101,51 @@ async function viewAdd(id, presetKind) {
             ${s.photos.map((p, k) => `<div class="thumb" style="background-image:url('${p.preview}')"><button class="x" data-rm="${k}" aria-label="Убрать фото">×</button></div>`).join('')}
             <label class="add-tile">${I.camera}<span>Камера</span><input type="file" accept="image/*" capture="environment" data-photo aria-label="Сфотографировать чек"></label>
             <label class="add-tile">${I.gallery}<span>Галерея</span><input type="file" accept="image/*" multiple data-photo aria-label="Загрузить фото из галереи"></label>
-          </div>` : ''}
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:8px">Сумму и дату с первого фото чека приложение попробует прочитать само — проверьте их.</div>` : ''}
         <button class="btn" id="save" style="margin-top:28px">Сохранить</button>
       </div>`;
+    bindAmount(s, draw);
     on('[data-k]', 'click', (e) => { s.kind = e.currentTarget.dataset.k; draw(); });
-    on('[data-src]', 'click', (e) => { s.source = e.currentTarget.dataset.src; draw(); });
     on('[data-c]', 'click', (e) => { s.category = e.currentTarget.dataset.c; draw(); });
     on('[data-rm]', 'click', (e) => { s.photos.splice(Number(e.currentTarget.dataset.rm), 1); draw(); });
+    app.querySelector('#date').addEventListener('change', () => { if (s.currency === 'MDL') { s.rate = null; loadRate(s, draw); } });
     on('[data-photo]', 'change', async (e) => {
       const files = Array.from(e.target.files || []);
+      const wasEmpty = !s.photos.length;
       for (const f of files.slice(0, 10 - s.photos.length)) {
         try { s.photos.push(await compressImage(f)); } catch (ex) { toast(ex.message); }
+      }
+      const needAmount = !(app.querySelector('#amt').value || '').trim();
+      if (wasEmpty && s.photos.length && needAmount && window.Receipt) {
+        s.ocr = { text: 'Читаю сумму с чека…' };
+        draw();
+        try {
+          const r = await Receipt.recognize(s.photos[0].preview);
+          if (r.amount) {
+            s.amountVal = String(r.amount).replace('.', ',');
+            if (r.currency === 'MDL') { s.currency = 'MDL'; }
+            if (r.date) s.ocrDate = r.date;
+            s.ocr = { text: `С чека: ${s.amountVal} ${r.currency === 'MDL' ? 'lei' : r.currency === 'EUR' ? '€' : ''}${r.date ? ` · ${dateRu(r.date)}` : ''} — проверьте` };
+            if (r.date && app.querySelector('#date')) app.querySelector('#date').value = r.date;
+            draw();
+            if (s.currency === 'MDL' && !s.rate) await loadRate(s, draw);
+            return;
+          }
+          s.ocr = { text: 'Сумму на чеке не нашли — введите вручную', err: true };
+        } catch { s.ocr = { text: 'Не удалось прочитать чек — введите сумму вручную', err: true }; }
       }
       draw();
     });
     app.querySelector('#save').onclick = async (e) => {
       const btn = e.currentTarget;
-      const amount = app.querySelector('#amt').value.replace(/\s/g, '').replace(',', '.');
       btn.disabled = true;
       btn.textContent = 'Сохраняю…';
       try {
         await api('POST', `/api/objects/${id}/entries`, {
           kind: s.kind,
-          source: s.source,
           category: s.category,
-          amount,
+          ...amountPayload(s),
           note: app.querySelector('#note').value,
           entry_date: app.querySelector('#date').value,
           photos: s.kind === 'out' ? s.photos.map((p) => ({ mime: p.mime, data: p.data })) : []
@@ -1085,19 +1163,56 @@ async function viewAdd(id, presetKind) {
   draw();
 }
 
+// Исправление операции: предложение уходит на согласование всем участникам сделки
+async function viewEntryEdit(eid) {
+  const d = await api('GET', `/api/entries/${eid}`);
+  const e = d.entry;
+  if (!e.mine) { toast('Исправить операцию может только её автор'); return go(`#/e/${eid}`); }
+  const foreman = (state.cache[e.object_id] && state.cache[e.object_id].me.role === 'foreman');
+  const s = { currency: e.orig_currency === 'MDL' ? 'MDL' : 'EUR', rate: e.rate || null, amountVal: String(e.orig_currency === 'MDL' ? e.orig_amount : e.amount).replace('.', ','), category: e.category || 'Ремонт' };
+  const draw = () => {
+    if (app.querySelector('#amt')) s.amountVal = app.querySelector('#amt').value;
+    const noteVal = app.querySelector('#note') ? app.querySelector('#note').value : e.note || '';
+    const dateVal = app.querySelector('#date') ? app.querySelector('#date').value : e.entry_date;
+    app.innerHTML = `
+      <div class="screen no-tab">
+        <div class="topbar">${backBtn(`#/e/${eid}`, 'Закрыть')}<div class="title"><b>Исправить операцию</b><small>нужно согласие участников</small></div><div class="spacer44"></div></div>
+        ${amountBlock(s, e.kind === 'rent' ? 'Получено за аренду' : 'Сумма расхода')}
+        ${e.kind === 'out' && !foreman ? `<span class="label">Категория</span><div class="chips">${d.categories.map((c) => `<button data-c="${esc(c)}" class="${c === s.category ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>` : ''}
+        <label class="label" for="note">Комментарий</label><input id="note" class="field" value="${esc(noteVal)}">
+        <label class="label" for="date">Дата</label><input id="date" class="field" type="date" value="${esc(dateVal)}">
+        <div class="card dashed" style="margin-top:16px;font-size:13px;line-height:1.5;color:#B5B5BA">Исправление применится, когда согласятся все участники сделки. До этого в расчётах остаётся прежняя версия.</div>
+        <button class="btn" id="save" style="margin-top:20px">Отправить на согласование</button>
+      </div>`;
+    bindAmount(s, draw);
+    on('[data-c]', 'click', (ev) => { s.category = ev.currentTarget.dataset.c; draw(); });
+    app.querySelector('#save').onclick = async (ev) => {
+      ev.currentTarget.disabled = true;
+      try {
+        const r = await api('POST', `/api/entries/${eid}/edit`, { ...amountPayload(s), category: s.category, note: app.querySelector('#note').value, entry_date: app.querySelector('#date').value });
+        delete state.cache[e.object_id];
+        toast(r.applied ? 'Исправлено' : 'Отправлено участникам на согласование', true);
+        go(`#/e/${eid}`);
+      } catch (ex) { toast(ex.message); ev.currentTarget.disabled = false; }
+    };
+  };
+  draw();
+}
+
 async function viewEntry(eid) {
   const d = await api('GET', `/api/entries/${eid}`);
   const e = d.entry;
   const ids = d.receipts.map((r) => r.id);
   app.innerHTML = `
     <div class="screen no-tab">
-      <div class="topbar">${backBtn(`#/o/${e.object_id}`)}<div class="title"><b>${KIND[e.kind]}${e.kind === 'out' ? ' · факт' : ''}</b></div><div class="spacer44"></div></div>
+      <div class="topbar">${backBtn(`#/o/${e.object_id}`)}<div class="title"><b>${KIND[e.kind]}</b></div><div class="spacer44"></div></div>
       <div style="text-align:center;margin-top:24px">
-        <div class="muted" style="font-size:13px">${esc(e.category || (e.kind === 'in' ? 'Взнос' : ''))}</div>
-        <div class="hero-num" style="font-size:42px">${e.kind === 'in' ? '+' : e.kind === 'out' ? '−' : ''}${fmt(e.amount)} <span class="cur">€</span></div>
+        <div class="muted" style="font-size:13px">${esc(e.category || (e.kind === 'in' ? 'Взнос' : e.kind === 'rent' ? 'Аренда · доход' : ''))}</div>
+        <div class="hero-num ${e.kind === 'rent' ? 'okc' : ''}" style="font-size:42px">${e.kind === 'in' || e.kind === 'rent' ? '+' : e.kind === 'out' ? '−' : ''}${fmt(e.amount)} <span class="cur">€</span></div>
+        ${e.orig_currency === 'MDL' ? `<div class="muted" style="font-size:13px">${fmt(e.orig_amount)} lei · курс НБМ ${String(e.rate).replace('.', ',')}</div>` : ''}
       </div>
       <div class="card list" style="margin-top:20px">
-        <div class="row">${avatar(e.user_id, e.author)}<div class="grow"><div class="t">${esc(e.author)}${e.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="s">${e.kind === 'in' ? 'внёс' : e.kind === 'out' ? 'оплатил' : 'запланировал'} · ${dateRu(e.entry_date)}</div></div></div>
+        <div class="row">${avatar(e.user_id, e.author)}<div class="grow"><div class="t">${esc(e.author)}${e.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="s">${e.kind === 'in' ? 'внёс' : e.kind === 'out' ? 'оплатил' : e.kind === 'rent' ? 'получил' : 'запланировал'} · ${dateRu(e.entry_date)}</div></div></div>
         ${e.note ? `<div class="row"><div class="grow muted" style="font-size:14px">Комментарий</div><div class="r" style="max-width:60%;text-align:right">${esc(e.note)}</div></div>` : ''}
       </div>
       ${e.kind === 'out' ? `
@@ -1108,6 +1223,27 @@ async function viewEntry(eid) {
             <label class="add-tile">${I.gallery}<span>Галерея</span><input type="file" accept="image/*" multiple data-photo aria-label="Загрузить фото"></label>` : ''}
           ${!ids.length && !e.mine ? '<div class="muted" style="font-size:13px">Чеков нет</div>' : ''}
         </div>` : ''}
+      ${d.edit ? (() => {
+        const v = d.edit.votes;
+        const p = d.edit.proposal;
+        const b = p.before || {};
+        const agreed = v.filter((x) => x.agreed).length;
+        const mineVote = v.find((x) => x.user_id === state.me.id);
+        const diff = [];
+        if (p.amount !== b.amount) diff.push(`<div class="kv"><span class="muted">Сумма</span><span class="num">${fmt(b.amount)} € → <b>${fmt(p.amount)} €</b></span></div>`);
+        if ((p.category || '') !== (b.category || '')) diff.push(`<div class="kv"><span class="muted">Категория</span><span>${esc(b.category || '—')} → <b>${esc(p.category || '—')}</b></span></div>`);
+        if ((p.note || '') !== (b.note || '')) diff.push(`<div class="kv"><span class="muted">Комментарий</span><span>«${esc(p.note || '')}»</span></div>`);
+        if (p.entry_date !== b.entry_date) diff.push(`<div class="kv"><span class="muted">Дата</span><span>${dateRu(b.entry_date)} → <b>${dateRu(p.entry_date)}</b></span></div>`);
+        return `<div class="card gold" style="margin-top:24px">
+          <div style="display:flex;justify-content:space-between"><b style="font-size:15px">Предложено исправление</b><b>${agreed} из ${v.length}</b></div>
+          <div style="margin-top:8px">${diff.join('') || '<div class="muted" style="font-size:13px">Без изменений</div>'}</div>
+          <div class="rows" style="margin-top:6px">${v.map((x) => `<div class="row" style="padding:8px 0">${avatar(x.user_id, x.name)}<div class="grow"><div class="t" style="font-size:14px">${esc(x.name)}${x.user_id === state.me.id ? ' <span class="muted">· вы</span>' : ''}</div></div>${x.agreed ? `<span class="gold" style="display:flex;align-items:center;gap:6px;font-size:13px">${I.check}Да</span>` : '<span class="muted" style="font-size:13px">ждём ответа</span>'}</div>`).join('')}</div>
+          <div class="muted" style="font-size:12px;line-height:1.45;margin-top:6px">Применится, когда согласятся все участники сделки. Любой отказ отменяет исправление.</div>
+          ${d.edit.canVote && mineVote && !mineVote.agreed ? '<div class="btn-row" style="margin-top:12px"><button class="btn sm" id="eyes" style="flex:1">Согласен</button><button class="btn ghost sm" id="eno" style="flex:1">Против</button></div>' : ''}
+          ${e.mine ? '<button class="link-btn" id="ecancel" style="display:block;margin:10px auto 0;color:var(--text)">Отозвать исправление</button>' : ''}
+        </div>`;
+      })() : ''}
+      ${e.mine && !d.edit && !d.deletion ? `<a class="btn ghost" href="#/e/${eid}/edit" style="margin-top:28px">Исправить операцию</a>` : ''}
       ${d.deletion ? (() => {
         const v = d.deletion.votes;
         const agreed = v.filter((x) => x.agreed).length;
@@ -1120,7 +1256,7 @@ async function viewEntry(eid) {
           ${d.deletion.canVote && mineVote && !mineVote.agreed ? '<div class="btn-row" style="margin-top:16px"><button class="btn danger" id="vyes" style="flex:1">Согласен удалить</button><button class="btn ghost" id="vno" style="flex:1">Против</button></div>' : ''}
           ${e.mine ? '<button class="link-btn" id="vcancel" style="display:block;margin:14px auto 0;color:var(--text)">Отозвать запрос</button>' : ''}`;
       })()
-      : e.mine ? '<button class="btn danger" id="del" style="margin-top:32px">Удалить операцию</button><div class="muted" style="font-size:12px;margin-top:8px;text-align:center">Удалится после согласия всех участников сделки</div>'
+      : e.mine && !d.edit ? '<button class="btn danger" id="del" style="margin-top:10px">Удалить операцию</button><div class="muted" style="font-size:12px;margin-top:8px;text-align:center">Удалится после согласия всех участников сделки</div>'
       : '<div class="muted" style="font-size:12px;margin-top:28px;text-align:center">Изменить или удалить операцию может только её автор — с согласия всех участников</div>'}
     </div>`;
   on('[data-open]', 'click', (ev) => openViewer(ids, Number(ev.currentTarget.dataset.open)));
@@ -1137,6 +1273,12 @@ async function viewEntry(eid) {
       }
     } catch (ex) { toast(ex.message); }
   });
+  const eyes = app.querySelector('#eyes');
+  if (eyes) eyes.onclick = async () => { try { const r = await api('POST', `/api/entries/${eid}/edit-vote`, { agree: true }); delete state.cache[e.object_id]; if (r.applied) toast('Исправление применено', true); viewEntry(eid); } catch (ex) { toast(ex.message); } };
+  const eno = app.querySelector('#eno');
+  if (eno) eno.onclick = async () => { try { await api('POST', `/api/entries/${eid}/edit-vote`, { agree: false }); toast('Исправление отклонено', true); viewEntry(eid); } catch (ex) { toast(ex.message); } };
+  const ec = app.querySelector('#ecancel');
+  if (ec) ec.onclick = async () => { try { await api('POST', `/api/entries/${eid}/edit-cancel`); viewEntry(eid); } catch (ex) { toast(ex.message); } };
   const del = app.querySelector('#del');
   const after = (r) => {
     delete state.cache[e.object_id];
@@ -1158,6 +1300,122 @@ async function viewEntry(eid) {
   const vc = app.querySelector('#vcancel');
   if (vc) vc.onclick = async () => {
     try { await api('POST', `/api/entries/${eid}/delete-cancel`); after({}); } catch (ex) { toast(ex.message); }
+  };
+}
+
+// ---------- закрытие сделки ----------
+async function viewDeal(id) {
+  const d = await api('GET', `/api/objects/${id}`);
+  state.cache[id] = d;
+  const { me, object: o, calc: c } = d;
+  const deal = d.deal;
+  const parties = d.members.filter((m) => m.role !== 'viewer');
+  if (!deal) {
+    if (!me.isCreator) { app.innerHTML = `<div class="screen no-tab"><div class="topbar">${backBtn(`#/o/${id}`)}</div><div class="empty">Сделку закрывает создатель объекта.</div></div>`; return; }
+    app.innerHTML = `
+      <div class="screen no-tab">
+        <div class="topbar">${backBtn(`#/o/${id}`)}<div class="spacer44"></div></div>
+        <div class="h-sub" style="margin-top:18px">${esc(o.name)}</div>
+        <h1 class="h">Закрыть сделку</h1>
+        <div class="lead">Укажите фактическую цену продажи и кто получил деньги от покупателя. Приложение посчитает, кто кому сколько должен выплатить: каждый получает назад свои вложения плюс свою долю прибыли.</div>
+        <form id="f" novalidate>
+          <label class="label" for="price">Фактическая цена продажи, €</label>
+          <input class="field" id="price" inputmode="decimal" value="${esc(o.sale_price ?? '')}">
+          <label class="label" for="sdate">Дата продажи</label>
+          <input class="field" id="sdate" type="date" value="${today()}">
+          <label class="label" for="recv">Деньги от покупателя получил</label>
+          <select class="field" id="recv">${parties.map((m) => `<option value="${m.user_id}" ${m.user_id === me.user_id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+          <div class="card dashed" style="margin-top:16px;font-size:13px;line-height:1.5;color:#B5B5BA">Расходы на продажу (риелтор, нотариус, налоги) внесите как обычные расходы — до или после закрытия, итог пересчитается. Действующий аванс отметьте «Сделка состоялась».</div>
+          <button class="btn" style="margin-top:20px">Закрыть сделку и посчитать выплаты</button>
+        </form>
+      </div>`;
+    app.querySelector('#f').onsubmit = async (e) => {
+      e.preventDefault();
+      if (!ask('Закрыть сделку? Статус объекта станет «продана», участники получат расчёт выплат.')) return;
+      try {
+        await api('POST', `/api/objects/${id}/close`, { sold_price: app.querySelector('#price').value.replace(/\s/g, '').replace(',', '.'), sold_at: app.querySelector('#sdate').value, receiver_id: app.querySelector('#recv').value });
+        delete state.cache[id];
+        toast('Сделка закрыта', true);
+        viewDeal(id);
+      } catch (ex) { toast(ex.message); }
+    };
+    return;
+  }
+  const paidCount = deal.transfers.filter((t) => t.paid_at).length;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(`#/o/${id}`)}<div class="spacer44"></div></div>
+      <div class="h-sub" style="margin-top:18px">${esc(o.name)} · продана ${dateRu(deal.sold_at)}</div>
+      <h1 class="h">Итог сделки</h1>
+      <div class="card green" style="margin-top:16px">
+        <div class="kv"><span class="muted">Продано за</span><b class="num">${money(deal.sold_price)}</b></div>
+        <div class="kv"><span class="muted">Затраты · факт</span><span class="num">−${fmt(c.factTotal)}\u00A0€</span></div>
+        ${c.rentTotal ? `<div class="kv"><span class="muted">Аренда</span><span class="num okc">+${fmt(c.rentTotal)}\u00A0€</span></div>` : ''}
+        ${c.advanceKept ? `<div class="kv"><span class="muted">Аванс, оставшийся у нас</span><span class="num okc">+${fmt(c.advanceKept)}\u00A0€</span></div>` : ''}
+        <div class="kv" style="border-top:1px solid #2E6B45;margin-top:6px;padding-top:8px"><b>Прибыль</b><b class="num ${c.profit >= 0 ? 'okc' : 'red'}">${signed(c.profit)}\u00A0€</b></div>
+        <div class="muted" style="font-size:12px;margin-top:6px">Деньги от покупателя у: ${esc(deal.receiver_name || '—')}</div>
+      </div>
+      ${deal.outdated ? `<div class="warn">После закрытия изменились операции — суммы выплат устарели.${me.isCreator ? '' : ' Создатель может пересчитать.'}</div>${me.isCreator ? '<button class="btn sm" id="recalc" style="margin-top:10px;width:100%">Пересчитать выплаты</button>' : ''}` : ''}
+      <div class="label">Кому сколько положено</div>
+      <div class="card list">${deal.rows.map((r) => `<div class="row">${avatar(r.user_id, r.name)}
+        <div class="grow"><div class="t" style="font-size:14px">${esc(r.name)}${r.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
+          <div class="s num">вложил ${fmt(r.invested)} € + прибыль ${fmt(r.profit)} €</div></div>
+        <div class="r"><div class="display num" style="font-weight:600">${money(r.total)}</div>${r.cash ? `<div class="muted num" style="font-size:11px">на руках ${fmt(r.cash)} €</div>` : ''}</div></div>`).join('')}</div>
+      <div class="label" style="display:flex;justify-content:space-between"><span>Выплаты</span><span>${paidCount} из ${deal.transfers.length}</span></div>
+      ${deal.transfers.length ? `<div class="card list">${deal.transfers.map((t) => `<div class="row">
+        <div class="grow"><div class="t" style="font-size:14px">${esc(t.fromName)} → ${esc(t.toName)}</div><div class="s">${t.paid_at ? `выплачено · ${dateRu(String(t.paid_at).slice(0, 10))}` : 'ещё не выплачено'}</div></div>
+        <div class="r"><div class="display num" style="font-weight:600">${money(t.amount)}</div>
+        ${t.can_mark ? `<button class="link-btn" data-pay="${t.from}-${t.to}" data-paid="${t.paid_at ? '0' : '1'}" style="padding:4px 0;font-size:13px">${t.paid_at ? 'Отменить отметку' : 'Отметить выплату'}</button>` : t.paid_at ? `<span class="okc" style="font-size:12px">${I.check}</span>` : ''}</div></div>`).join('')}</div>` : '<div class="empty">Выплаты не нужны — у каждого уже на руках его сумма.</div>'}
+      ${paidCount === deal.transfers.length && deal.transfers.length ? '<div class="card green" style="margin-top:12px;font-size:14px">Все выплаты сделаны — сделка завершена.</div>' : ''}
+      <a class="btn ghost" href="#/o/${id}/report" style="margin-top:20px">Отчёт по сделке · PDF / Excel</a>
+      ${me.isCreator ? '<button class="link-btn" id="reopen" style="display:block;margin:14px auto 0;color:var(--muted)">Отменить закрытие сделки</button>' : ''}
+    </div>`;
+  on('[data-pay]', 'click', async (e) => {
+    const [from, to] = e.currentTarget.dataset.pay.split('-').map(Number);
+    const paid = e.currentTarget.dataset.paid === '1';
+    try { await api('POST', `/api/objects/${id}/payouts/mark`, { from, to, paid }); toast(paid ? 'Выплата отмечена' : 'Отметка снята', true); viewDeal(id); } catch (ex) { toast(ex.message); }
+  });
+  const rc = app.querySelector('#recalc');
+  if (rc) rc.onclick = async () => { try { await api('POST', `/api/objects/${id}/recalc`); toast('Пересчитано', true); viewDeal(id); } catch (ex) { toast(ex.message); } };
+  const ro = app.querySelector('#reopen');
+  if (ro) ro.onclick = async () => { if (!ask('Отменить закрытие сделки? Отметки о выплатах будут сброшены.')) return; try { await api('POST', `/api/objects/${id}/reopen`); delete state.cache[id]; go(`#/o/${id}`); } catch (ex) { toast(ex.message); } };
+}
+
+// ---------- отчёт ----------
+async function viewReport(id, lang) {
+  lang = lang || I18N.lang;
+  const d = await api('GET', `/api/objects/${id}/report?lang=${lang}`);
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(`#/o/${id}`)}<div class="title"><b>Отчёт по объекту</b><small>для партнёров и бухгалтера</small></div><div class="spacer44"></div></div>
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:18px"><button data-rl="ru" class="${lang === 'ru' ? 'on' : ''}" data-nt>Русский</button><button data-rl="ro" class="${lang === 'ro' ? 'on' : ''}" data-nt>Limba de stat</button></div>
+      <div class="btn-row"><button class="btn" id="pdf" style="flex:1">PDF / Печать</button><a class="btn ghost" id="xls" href="/api/objects/${id}/export.csv?lang=${lang}" style="flex:1">Excel</a></div>
+      <button class="btn ghost sm" id="share" style="width:100%;margin-top:10px">Отправить ссылку на отчёт</button>
+      <iframe id="doc" title="Отчёт" style="width:100%;height:72vh;border:0;border-radius:16px;margin-top:14px;background:#E9E7E1"></iframe>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Excel — все операции таблицей (открывается в Excel и Google Таблицах). Ссылка на отчёт работает 7 дней без входа в приложение.</div>
+    </div>`;
+  const frame = app.querySelector('#doc');
+  frame.srcdoc = d.html;
+  on('[data-rl]', 'click', (e) => viewReport(id, e.currentTarget.dataset.rl));
+  const link = async () => (await api('POST', `/api/objects/${id}/report-link`, { lang })).url;
+  app.querySelector('#pdf').onclick = async () => {
+    if (TG) { try { openExternal(await link()); } catch (ex) { toast(ex.message); } }
+    else { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { window.print(); } }
+  };
+  app.querySelector('#xls').onclick = async (e) => {
+    if (!TG) return;
+    e.preventDefault();
+    toast('Excel скачивается в браузере: откройте отчёт по ссылке', true);
+    try { openExternal(await link()); } catch (ex) { toast(ex.message); }
+  };
+  app.querySelector('#share').onclick = async () => {
+    try {
+      const url = await link();
+      const text = lang === 'ro' ? 'Raport pe obiect' : 'Отчёт по объекту';
+      if (TG) openExternal(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+      else if (navigator.share) navigator.share({ title: text, url }).catch(() => {});
+      else { await navigator.clipboard.writeText(url); toast('Ссылка скопирована', true); }
+    } catch (ex) { toast(ex.message); }
   };
 }
 
@@ -1194,6 +1452,7 @@ async function viewForecast(id) {
         <div class="display num" style="font-weight:600;font-size:30px;margin-top:6px;color:${c.profit >= 0 ? 'var(--gold)' : 'var(--red)'}">${signed(c.profit)} €</div>
         ${c.advanceKept ? `<div style="font-size:12px;color:#B8A98A;margin-top:4px">в т.ч. аванс, оставшийся у нас: <b class="okc">+${fmt(c.advanceKept)}\u00A0€</b></div>` : ''}
         ${c.advanceActive ? `<div style="font-size:12px;color:#B8A98A;margin-top:4px">действующий аванс покупателя: ${money(c.advanceActive)}</div>` : ''}
+        ${c.rentTotal ? `<div style="font-size:12px;color:#B8A98A;margin-top:4px">в т.ч. аренда: <b class="okc">+${fmt(c.rentTotal)}\u00A0€</b></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #3A3428">${dist}</div>
         ${c.shareSum !== 100 ? '<div class="red" style="font-size:12px;margin-top:10px">Доли инвесторов не равны 100 % — создатель должен их поправить.</div>' : ''}
       </div>` : ''}
@@ -1405,11 +1664,14 @@ const routes = [
   [/^#\/o\/(\d+)\/add(?:\/(\w+))?$/, (m) => viewAdd(m[1], m[2])],
   [/^#\/o\/(\d+)\/forecast$/, (m) => viewForecast(m[1])],
   [/^#\/o\/(\d+)\/advance$/, (m) => viewAdvance(m[1])],
+  [/^#\/o\/(\d+)\/deal$/, (m) => viewDeal(m[1])],
+  [/^#\/o\/(\d+)\/report$/, (m) => viewReport(m[1])],
   [/^#\/adv\/(\d+)$/, (m) => viewAdvContract(m[1])],
   [/^#\/o\/(\d+)\/members$/, (m) => viewMembers(m[1])],
   [/^#\/o\/(\d+)\/shares$/, (m) => viewShares(m[1])],
   [/^#\/o\/(\d+)\/delete$/, (m) => viewDelete(m[1])],
   [/^#\/e\/(\d+)$/, (m) => viewEntry(m[1])],
+  [/^#\/e\/(\d+)\/edit$/, (m) => viewEntryEdit(m[1])],
   [/^#?\/?$/, () => viewHome()]
 ];
 

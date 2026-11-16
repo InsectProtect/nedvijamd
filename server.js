@@ -7,6 +7,7 @@ const { computeObject, CATEGORIES } = require('./calc');
 const tg = require('./tg');
 const { buildContract, makeSnapshot, termsHash } = require('./contract');
 const { buildAdvanceContract } = require('./advance_contract');
+const { buildReport } = require('./report');
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
@@ -175,6 +176,7 @@ async function membership(objectId, userId) {
 async function loadObject(objectId) {
   const object = await db.one(
     `SELECT id, name, area, status, purchase_price, sale_price, repair_budget, installment, installment_monthly, creator_id, delete_requested_at, created_at,
+            sold_price, to_char(sold_at, 'YYYY-MM-DD') AS sold_at, sold_receiver_id,
             (photo IS NOT NULL) AS has_photo, photo_v, contract_fields FROM objects WHERE id = $1`,
     [objectId]
   );
@@ -189,7 +191,10 @@ async function loadObject(objectId) {
             to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, u.name AS author,
             (SELECT count(*) FROM receipts r WHERE r.entry_id = e.id) AS receipts,
             (e.delete_requested_at IS NOT NULL) AS delete_pending,
-            (SELECT coalesce(string_agg(v.user_id::text, ','), '') FROM entry_delete_votes v WHERE v.entry_id = e.id) AS delete_votes
+            (SELECT coalesce(string_agg(v.user_id::text, ','), '') FROM entry_delete_votes v WHERE v.entry_id = e.id) AS delete_votes,
+            (e.edit_requested_at IS NOT NULL) AS edit_pending,
+            (SELECT coalesce(string_agg(v.user_id::text, ','), '') FROM entry_edit_votes v WHERE v.entry_id = e.id) AS edit_votes,
+            e.orig_amount, e.orig_currency, e.rate
      FROM entries e JOIN users u ON u.id = e.user_id
      WHERE e.object_id = $1 ORDER BY e.entry_date DESC, e.id DESC`,
     [objectId]
@@ -247,6 +252,43 @@ async function maybeFinishDelete(objectId) {
 }
 
 const positiveOrNull = (v) => { const x = num(v); return Number.isFinite(x) && x > 0 ? x : null; };
+
+// ---------- курс лея (НБМ) ----------
+const rateCache = new Map();
+function parseBnmEur(xml) {
+  const m = String(xml).match(/<CharCode>\s*EUR\s*<\/CharCode>[\s\S]*?<Nominal>\s*([\d.,]+)\s*<\/Nominal>[\s\S]*?<Value>\s*([\d.,]+)\s*<\/Value>/);
+  if (!m) return null;
+  const nominal = Number(m[1].replace(',', '.')) || 1;
+  const value = Number(m[2].replace(',', '.'));
+  return Number.isFinite(value) && value > 0 ? Math.round((value / nominal) * 10000) / 10000 : null;
+}
+async function eurRate(dateIso) {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(dateIso || '') ? dateIso : new Date().toISOString().slice(0, 10);
+  if (rateCache.has(d)) return rateCache.get(d);
+  const [y, m, dd] = d.split('-');
+  try {
+    const r = await fetch(`https://www.bnm.md/ro/official_exchange_rates?get_xml=1&date=${dd}.${m}.${y}`, { signal: AbortSignal.timeout(8000) });
+    const rate = parseBnmEur(await r.text());
+    if (rate) rateCache.set(d, rate);
+    return rate;
+  } catch (e) {
+    console.warn('BNM rate failed', e.message);
+    return null;
+  }
+}
+
+// Сумма из формы: в евро или в леях с переводом по курсу
+async function amountFromBody(body) {
+  if (body.currency === 'MDL') {
+    const orig = positiveAmount(body.orig_amount !== undefined ? body.orig_amount : body.amount);
+    let rate = Number(String(body.rate || '').replace(',', '.'));
+    if (!Number.isFinite(rate) || rate <= 0) rate = await eurRate(body.entry_date);
+    if (!rate || rate < 5 || rate > 50) fail(400, 'Не удалось получить курс лея — укажите курс вручную');
+    return { amount: Math.round((orig / rate) * 100) / 100, orig_amount: orig, orig_currency: 'MDL', rate };
+  }
+  return { amount: positiveAmount(body.amount), orig_amount: null, orig_currency: null, rate: null };
+}
+
 
 // Ремонт: потрачено по факту против ориентировочной стоимости
 function repairInfo(object, calc) {
@@ -382,6 +424,13 @@ route('PUT', '/api/admin/settings', async ({ user, body }) => {
     );
   }
   return { settings: { personal_data: await personalDataOn() } };
+});
+
+route('GET', '/api/rate', async ({ req }) => {
+  const date = new URL(req.url, 'http://x').searchParams.get('date');
+  const rate = await eurRate(date);
+  if (!rate) fail(503, 'Курс НБМ сейчас недоступен — укажите курс вручную');
+  return { rate, date: date || new Date().toISOString().slice(0, 10), source: 'BNM' };
 });
 
 // Имя, фамилия и язык
@@ -551,13 +600,137 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       mine: Number(e.user_id) === Number(user.id),
       delete_pending: e.delete_pending === true || e.delete_pending === 't',
       need_my_vote: (e.delete_pending === true || e.delete_pending === 't') && (me.role === 'investor' || me.role === 'foreman') &&
-        !String(e.delete_votes || '').split(',').includes(String(user.id))
+        !String(e.delete_votes || '').split(',').includes(String(user.id)),
+      edit_pending: e.edit_pending === true || e.edit_pending === 't',
+      need_my_edit_vote: (e.edit_pending === true || e.edit_pending === 't') && (me.role === 'investor' || me.role === 'foreman') &&
+        !String(e.edit_votes || '').split(',').includes(String(user.id)),
+      orig_amount: e.orig_amount === null || e.orig_amount === undefined ? null : Number(e.orig_amount),
+      orig_currency: e.orig_currency || null
     })),
     calc: { ...calc, invested: undefined, payout: undefined,
       settlement: calc.settlement.map((s) => ({ ...s, fromName: names[s.from], toName: names[s.to] })) },
     advances: advances.map(advanceView(user, me)),
+    deal: await dealView(object, calc, names, user),
     categories: CATEGORIES
   };
+});
+
+// ---------- отчёт по объекту ----------
+async function reportHtml(objectId, lang, printable) {
+  const { object, members, entries, advances } = await loadObject(objectId);
+  const calc = computeObject(object, members, entries, advances);
+  const names = Object.fromEntries(members.map((m) => [m.user_id, m.name]));
+  calc.settlement = calc.settlement.map((s) => ({ ...s, fromName: names[s.from], toName: names[s.to] }));
+  return buildReport({
+    object, members: members.map((m) => memberView(m, calc)), entries, advances, calc,
+    installment: installmentInfo(object, calc), deal: await dealView(object, calc, names, { id: 0 }), lang, printable
+  });
+}
+
+route('GET', '/api/objects/:id/report', async ({ req, user, params }) => {
+  await membership(params.id, user.id);
+  const lang = new URL(req.url, 'http://x').searchParams.get('lang') === 'ro' ? 'ro' : 'ru';
+  return { html: await reportHtml(params.id, lang, false) };
+});
+
+route('POST', '/api/objects/:id/report-link', async ({ user, params, body }) => {
+  await membership(params.id, user.id);
+  const t = token(24);
+  await db.query(`INSERT INTO report_links (token, object_id, lang, expires_at) VALUES ($1, $2, $3, now() + interval '7 days')`, [t, params.id, body.lang === 'ro' ? 'ro' : 'ru']);
+  return { url: `${PUBLIC_URL}/r/${t}` };
+});
+
+// ---------- закрытие сделки ----------
+async function dealView(object, calc, names, user) {
+  if (!calc.closed) return null;
+  const stored = await db.query('SELECT from_user, to_user, amount, paid_at FROM deal_payouts WHERE object_id = $1', [object.id]);
+  const key = (f, t) => `${f}-${t}`;
+  const storedMap = Object.fromEntries(stored.map((r) => [key(Number(r.from_user), Number(r.to_user)), r]));
+  const computed = calc.closing ? calc.closing.transfers : [];
+  const same = computed.length === stored.length && computed.every((t) => {
+    const s = storedMap[key(t.from, t.to)];
+    return s && Math.abs(Number(s.amount) - t.amount) < 1;
+  });
+  return {
+    sold_price: Number(object.sold_price),
+    sold_at: object.sold_at,
+    receiver_id: object.sold_receiver_id === null ? null : Number(object.sold_receiver_id),
+    receiver_name: names[object.sold_receiver_id] || null,
+    rows: (calc.closing ? calc.closing.rows : []).map((r) => ({ ...r, name: names[r.user_id] })),
+    transfers: stored.map((r) => ({
+      from: Number(r.from_user), to: Number(r.to_user), amount: Number(r.amount), paid_at: r.paid_at,
+      fromName: names[r.from_user], toName: names[r.to_user],
+      can_mark: Number(r.from_user) === Number(user.id) || Number(r.to_user) === Number(user.id)
+    })),
+    outdated: !same
+  };
+}
+
+async function storePayouts(objectId) {
+  const { object, members, entries, advances } = await loadObject(objectId);
+  const calc = computeObject(object, members, entries, advances);
+  await db.query('DELETE FROM deal_payouts WHERE object_id = $1', [objectId]);
+  for (const t of (calc.closing ? calc.closing.transfers : [])) {
+    await db.query('INSERT INTO deal_payouts (object_id, from_user, to_user, amount) VALUES ($1, $2, $3, $4)', [objectId, t.from, t.to, t.amount]);
+  }
+  return calc;
+}
+
+route('POST', '/api/objects/:id/close', async ({ user, params, body }) => {
+  const me = await membership(params.id, user.id);
+  if (!me.isCreator) fail(403, 'Закрыть сделку может только создатель объекта');
+  const price = positiveAmount(body.sold_price);
+  const receiver = Number(body.receiver_id);
+  const rm = await db.one(`SELECT role FROM members WHERE object_id = $1 AND user_id = $2`, [params.id, receiver]);
+  if (!rm || rm.role === 'viewer') fail(400, 'Укажите участника, который получил деньги от покупателя');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.sold_at || '') ? body.sold_at : null;
+  await db.query(
+    `UPDATE objects SET sold_price = $1, sold_at = COALESCE($2::date, current_date), sold_receiver_id = $3, status = 'продана' WHERE id = $4`,
+    [price, date, receiver, params.id]
+  );
+  const calc = await storePayouts(params.id);
+  const oname = tg.escHtml(await objectName(params.id));
+  notifyObject(params.id, user.id, (lang) => lang === 'ro'
+    ? `🏁 <b>${oname}</b>\nTranzacția a fost închisă: vândut cu <b>${fmtEur(price)}</b>, profit ${fmtEur(calc.profit)}. Vedeți cine cui plătește în aplicație.`
+    : `🏁 <b>${oname}</b>\nСделка закрыта: продано за <b>${fmtEur(price)}</b>, прибыль ${fmtEur(calc.profit)}. Кто кому сколько платит — в приложении.`,
+    `/o/${params.id}/deal`);
+  return { ok: true };
+});
+
+route('POST', '/api/objects/:id/recalc', async ({ user, params }) => {
+  const me = await membership(params.id, user.id);
+  if (!me.isCreator) fail(403, 'Пересчитать может только создатель объекта');
+  await storePayouts(params.id);
+  return { ok: true };
+});
+
+route('POST', '/api/objects/:id/reopen', async ({ user, params }) => {
+  const me = await membership(params.id, user.id);
+  if (!me.isCreator) fail(403, 'Вернуть сделку может только создатель объекта');
+  await db.query(`UPDATE objects SET sold_price = NULL, sold_at = NULL, sold_receiver_id = NULL, status = 'продаётся' WHERE id = $1`, [params.id]);
+  await db.query('DELETE FROM deal_payouts WHERE object_id = $1', [params.id]);
+  return { ok: true };
+});
+
+route('POST', '/api/objects/:id/payouts/mark', async ({ user, params, body }) => {
+  await membership(params.id, user.id);
+  const from = Number(body.from), to = Number(body.to);
+  if (Number(user.id) !== from && Number(user.id) !== to) fail(403, 'Отметить выплату может тот, кто платит, или тот, кто получает');
+  const r = await db.one('SELECT amount FROM deal_payouts WHERE object_id = $1 AND from_user = $2 AND to_user = $3', [params.id, from, to]);
+  if (!r) fail(404, 'Выплата не найдена');
+  await db.query(
+    `UPDATE deal_payouts SET paid_at = CASE WHEN $1 THEN now() ELSE NULL END, marked_by = $2 WHERE object_id = $3 AND from_user = $4 AND to_user = $5`,
+    [body.paid === true, user.id, params.id, from, to]
+  );
+  if (body.paid === true) {
+    const oname = tg.escHtml(await objectName(params.id));
+    const names = Object.fromEntries((await db.query('SELECT id, name FROM users WHERE id = ANY($1::int[])', [`{${from},${to}}`])).map((u) => [Number(u.id), u.name]));
+    notifyObject(params.id, user.id, (lang) => lang === 'ro'
+      ? `💸 <b>${oname}</b>\n${tg.escHtml(names[from])} → ${tg.escHtml(names[to])}: ${fmtEur(r.amount)} — achitat.`
+      : `💸 <b>${oname}</b>\n${tg.escHtml(names[from])} → ${tg.escHtml(names[to])}: ${fmtEur(r.amount)} — выплачено.`,
+      `/o/${params.id}/deal`, [from, to]);
+  }
+  return { ok: true };
 });
 
 const advanceView = (user, me) => (a) => ({
@@ -991,20 +1164,21 @@ route('DELETE', '/api/objects/:id/members/:uid', async ({ user, params }) => {
 route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
   const me = await membership(params.id, user.id);
   if (me.role === 'viewer') fail(403, 'Роль «Просмотр» не может добавлять операции');
-  const kind = ['in', 'out'].includes(body.kind) ? body.kind : fail(400, 'Неизвестный тип операции');
-  let category = kind === 'in' ? null : str(body.category, 60) || 'Прочее';
+  const kind = ['in', 'out', 'rent'].includes(body.kind) ? body.kind : fail(400, 'Неизвестный тип операции');
+  let category = kind === 'out' ? str(body.category, 60) || 'Прочее' : null;
   if (me.role === 'foreman') {
-    if (kind === 'in') fail(403, 'Прораб не вносит взносы, только расходы на ремонт');
+    if (kind !== 'out') fail(403, 'Прораб вносит только расходы на ремонт');
     category = 'Ремонт';
   }
   const source = 'own'; // общего котла нет: каждый платит из своих денег
-  const amount = positiveAmount(body.amount);
+  const money = await amountFromBody(body);
+  const amount = money.amount;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(body.entry_date || '') ? body.entry_date : null;
   // Автор операции — всегда тот, кто вошёл. За другого внести нельзя.
   const entry = await db.one(
-    `INSERT INTO entries (object_id, user_id, kind, source, category, amount, note, entry_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, current_date)) RETURNING id`,
-    [params.id, user.id, kind, source, category, amount, str(body.note, 300) || null, date]
+    `INSERT INTO entries (object_id, user_id, kind, source, category, amount, note, entry_date, orig_amount, orig_currency, rate)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, current_date), $9, $10, $11) RETURNING id`,
+    [params.id, user.id, kind, source, category, amount, str(body.note, 300) || null, date, money.orig_amount, money.orig_currency, money.rate]
   );
   if (kind === 'out') await savePhotos(entry.id, user.id, body.photos);
   if (kind !== 'plan') {
@@ -1012,7 +1186,9 @@ route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
     const photos = kind === 'out' && Array.isArray(body.photos) ? body.photos.length : 0;
     const note = str(body.note, 300);
     notifyObject(params.id, user.id, (lang) => {
-      const what = kind === 'in'
+      const what = kind === 'rent'
+        ? (lang === 'ro' ? `a primit chiria <b>${fmtEur(amount)}</b>` : `получил аренду <b>${fmtEur(amount)}</b>`)
+        : kind === 'in'
         ? (lang === 'ro' ? `a depus o contribuție <b>${fmtEur(amount)}</b>` : `внёс взнос <b>${fmtEur(amount)}</b>`)
         : (lang === 'ro' ? `a adăugat o cheltuială <b>${fmtEur(amount)}</b> · ${tg.escHtml(catL(category).ro)}` : `добавил расход <b>${fmtEur(amount)}</b> · ${tg.escHtml(category)}`);
       return `🏠 <b>${tg.escHtml(name)}</b>\n${tg.escHtml(user.name)} ${what}${note ? `\n«${tg.escHtml(note)}»` : ''}${photos ? `\n🧾 ${lang === 'ro' ? 'Bonuri' : 'Чеков'}: ${photos}` : ''}`;
@@ -1025,7 +1201,7 @@ route('GET', '/api/entries/:id', async ({ user, params }) => {
   const e = await db.one(
     `SELECT e.id, e.object_id, e.user_id, e.kind, e.source, e.category, e.amount, e.note,
             to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, u.name AS author,
-            (e.delete_requested_at IS NOT NULL) AS delete_pending
+            (e.delete_requested_at IS NOT NULL) AS delete_pending, e.edit_proposal, e.orig_amount, e.orig_currency, e.rate
      FROM entries e JOIN users u ON u.id = e.user_id WHERE e.id = $1`,
     [params.id]
   );
@@ -1044,11 +1220,121 @@ route('GET', '/api/entries/:id', async ({ user, params }) => {
       canVote: me.role === 'investor' || me.role === 'foreman'
     };
   }
+  let edit = null;
+  const proposal = e.edit_proposal ? (typeof e.edit_proposal === 'string' ? JSON.parse(e.edit_proposal) : e.edit_proposal) : null;
+  if (proposal) {
+    const votes = await db.query(
+      `SELECT u.id, u.name, m.role, EXISTS (SELECT 1 FROM entry_edit_votes v WHERE v.entry_id = $1 AND v.user_id = u.id) AS agreed
+       FROM members m JOIN users u ON u.id = m.user_id WHERE m.object_id = $2 AND m.role IN ('investor','foreman') ORDER BY m.joined_at, u.id`,
+      [e.id, e.object_id]
+    );
+    edit = {
+      proposal,
+      votes: votes.map((v) => ({ user_id: Number(v.id), name: v.name, role: v.role, agreed: v.agreed === true || v.agreed === 't' })),
+      canVote: me.role === 'investor' || me.role === 'foreman'
+    };
+  }
+  const { edit_proposal, ...rest } = e;
   return {
-    entry: { ...e, delete_pending: pending, amount: Number(e.amount), user_id: Number(e.user_id), mine: Number(e.user_id) === Number(user.id) },
+    entry: { ...rest, delete_pending: pending, edit_pending: !!proposal, amount: Number(e.amount), user_id: Number(e.user_id), mine: Number(e.user_id) === Number(user.id),
+      orig_amount: e.orig_amount === null ? null : Number(e.orig_amount), rate: e.rate === null ? null : Number(e.rate) },
     receipts,
-    deletion
+    deletion,
+    edit,
+    categories: CATEGORIES
   };
+});
+
+// ---------- исправление операции: автор предлагает, все участники сделки подтверждают ----------
+
+async function applyEditIfAgreed(entryId, objectId) {
+  const voters = await db.query(
+    `SELECT u.id, EXISTS (SELECT 1 FROM entry_edit_votes v WHERE v.entry_id = $1 AND v.user_id = u.id) AS agreed
+     FROM members m JOIN users u ON u.id = m.user_id WHERE m.object_id = $2 AND m.role IN ('investor','foreman')`,
+    [entryId, objectId]
+  );
+  if (!voters.length || !voters.every((v) => v.agreed === true || v.agreed === 't')) return false;
+  const e = await db.one('SELECT edit_proposal FROM entries WHERE id = $1', [entryId]);
+  const p = typeof e.edit_proposal === 'string' ? JSON.parse(e.edit_proposal) : e.edit_proposal;
+  await db.query(
+    `UPDATE entries SET amount = $1, category = $2, note = $3, entry_date = $4::date, orig_amount = $5, orig_currency = $6, rate = $7,
+       edit_proposal = NULL, edit_requested_at = NULL WHERE id = $8`,
+    [p.amount, p.category, p.note, p.entry_date, p.orig_amount, p.orig_currency, p.rate, entryId]
+  );
+  await db.query('DELETE FROM entry_edit_votes WHERE entry_id = $1', [entryId]);
+  return true;
+}
+
+route('POST', '/api/entries/:id/edit', async ({ user, params, body }) => {
+  const e = await db.one(
+    `SELECT id, object_id, user_id, kind, category, note, amount, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, delete_requested_at, edit_requested_at FROM entries WHERE id = $1`,
+    [params.id]
+  );
+  if (!e) fail(404, 'Операция не найдена');
+  const me = await membership(e.object_id, user.id);
+  if (Number(e.user_id) !== Number(user.id)) fail(403, 'Исправить операцию может только её автор');
+  if (e.delete_requested_at) fail(400, 'По операции уже идёт запрос на удаление');
+  const money = await amountFromBody({ ...body, entry_date: body.entry_date || e.entry_date });
+  let category = e.kind === 'out' ? str(body.category, 60) || e.category || 'Прочее' : null;
+  if (me.role === 'foreman') category = 'Ремонт';
+  const proposal = {
+    amount: money.amount, orig_amount: money.orig_amount, orig_currency: money.orig_currency, rate: money.rate,
+    category, note: str(body.note, 300) || null,
+    entry_date: /^\d{4}-\d{2}-\d{2}$/.test(body.entry_date || '') ? body.entry_date : e.entry_date,
+    before: { amount: Number(e.amount), category: e.category, note: e.note, entry_date: e.entry_date }
+  };
+  await db.query('UPDATE entries SET edit_proposal = $1::jsonb, edit_requested_at = now() WHERE id = $2', [JSON.stringify(proposal), e.id]);
+  await db.query('DELETE FROM entry_edit_votes WHERE entry_id = $1', [e.id]);
+  await db.query('INSERT INTO entry_edit_votes (entry_id, user_id) VALUES ($1, $2)', [e.id, user.id]);
+  const applied = await applyEditIfAgreed(e.id, e.object_id);
+  if (!applied) {
+    const oname = tg.escHtml(await objectName(e.object_id));
+    const changes = (lang) => {
+      const out = [];
+      if (proposal.amount !== Number(e.amount)) out.push(`${lang === 'ro' ? 'suma' : 'сумма'}: ${fmtEur(e.amount)} → <b>${fmtEur(proposal.amount)}</b>`);
+      if (proposal.category !== e.category) out.push(`${lang === 'ro' ? 'categoria' : 'категория'}: ${tg.escHtml(e.category || '—')} → ${tg.escHtml(proposal.category || '—')}`);
+      if ((proposal.note || '') !== (e.note || '')) out.push(`${lang === 'ro' ? 'comentariu' : 'комментарий'}: «${tg.escHtml(proposal.note || '')}»`);
+      if (proposal.entry_date !== e.entry_date) out.push(`${lang === 'ro' ? 'data' : 'дата'}: ${proposal.entry_date}`);
+      return out.join('\n');
+    };
+    notifyObject(e.object_id, user.id, (lang) => lang === 'ro'
+      ? `✏️ <b>${oname}</b>\n${tg.escHtml(user.name)} propune corectarea operațiunii:\n${changes('ro')}\nEste necesar acordul tuturor participanților.`
+      : `✏️ <b>${oname}</b>\n${tg.escHtml(user.name)} предлагает исправить операцию:\n${changes('ru')}\nНужно согласие всех участников сделки.`,
+      `/e/${e.id}`);
+  }
+  return { applied, pending: !applied };
+});
+
+route('POST', '/api/entries/:id/edit-vote', async ({ user, params, body }) => {
+  const e = await db.one('SELECT id, object_id, user_id, edit_requested_at FROM entries WHERE id = $1', [params.id]);
+  if (!e) fail(404, 'Операция не найдена');
+  const me = await membership(e.object_id, user.id);
+  if (!e.edit_requested_at) fail(400, 'Исправлений на согласовании нет');
+  if (me.role === 'viewer') fail(403, 'Роль «Просмотр» не голосует');
+  if (body.agree === true) {
+    await db.query('INSERT INTO entry_edit_votes (entry_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [e.id, user.id]);
+    const applied = await applyEditIfAgreed(e.id, e.object_id);
+    if (applied) {
+      const oname = tg.escHtml(await objectName(e.object_id));
+      notifyObject(e.object_id, user.id, (lang) => lang === 'ro' ? `✏️ <b>${oname}</b>\nCorectarea operațiunii a fost aplicată: toți au fost de acord.` : `✏️ <b>${oname}</b>\nИсправление операции применено: все согласились.`, `/e/${e.id}`);
+    }
+    return { applied };
+  }
+  await db.query('UPDATE entries SET edit_proposal = NULL, edit_requested_at = NULL WHERE id = $1', [e.id]);
+  await db.query('DELETE FROM entry_edit_votes WHERE entry_id = $1', [e.id]);
+  const oname = tg.escHtml(await objectName(e.object_id));
+  notifyObject(e.object_id, user.id, (lang) => lang === 'ro' ? `✏️ <b>${oname}</b>\n${tg.escHtml(user.name)} este împotriva corectării — operațiunea rămâne neschimbată.` : `✏️ <b>${oname}</b>\n${tg.escHtml(user.name)} против исправления — операция остаётся как была.`, `/e/${e.id}`);
+  return { applied: false, cancelled: true };
+});
+
+route('POST', '/api/entries/:id/edit-cancel', async ({ user, params }) => {
+  const e = await db.one('SELECT object_id, user_id FROM entries WHERE id = $1', [params.id]);
+  if (!e) fail(404, 'Операция не найдена');
+  await membership(e.object_id, user.id);
+  if (Number(e.user_id) !== Number(user.id)) fail(403, 'Отозвать исправление может только автор');
+  await db.query('UPDATE entries SET edit_proposal = NULL, edit_requested_at = NULL WHERE id = $1', [params.id]);
+  await db.query('DELETE FROM entry_edit_votes WHERE entry_id = $1', [params.id]);
+  return { ok: true };
 });
 
 // Удаление операции: автор просит, все участники сделки (инвесторы и прорабы) подтверждают.
@@ -1077,6 +1363,8 @@ route('DELETE', '/api/entries/:id', async ({ user, params }) => {
   if (!e) fail(404, 'Операция не найдена');
   await membership(e.object_id, user.id);
   if (Number(e.user_id) !== Number(user.id)) fail(403, 'Запросить удаление может только автор операции');
+  const ed = await db.one('SELECT edit_requested_at FROM entries WHERE id = $1', [e.id]);
+  if (ed && ed.edit_requested_at) fail(400, 'По операции уже идёт согласование исправления');
   if (!e.delete_requested_at) {
     await db.query('UPDATE entries SET delete_requested_at = now() WHERE id = $1', [e.id]);
     await db.query('DELETE FROM entry_delete_votes WHERE entry_id = $1', [e.id]);
@@ -1233,17 +1521,23 @@ async function serveObjectPhoto(req, res, id) {
   res.end(buf);
 }
 
-async function serveExport(req, res, id) {
-  const user = await currentUser(req);
-  if (!user) fail(401, 'Нужно войти');
-  await membership(id, user.id);
+async function serveExport(req, res, id, viaLink, lang) {
+  if (!viaLink) {
+    const user = await currentUser(req);
+    if (!user) fail(401, 'Нужно войти');
+    await membership(id, user.id);
+  }
   const { object, entries } = await loadObject(id);
-  const kinds = { in: 'Взнос', out: 'Расход (факт)', plan: 'План' };
+  if (!lang) lang = new URL(req.url, 'http://x').searchParams.get('lang') === 'ro' ? 'ro' : 'ru';
+  const ro = lang === 'ro';
+  const kinds = ro ? { in: 'Contribuție', out: 'Cheltuială', plan: 'Plan', rent: 'Chirie (venit)' } : { in: 'Взнос', out: 'Расход', plan: 'План', rent: 'Аренда (доход)' };
   const esc = (v) => `"${String(v === null || v === undefined ? '' : v).replace(/"/g, '""')}"`;
-  const lines = [['Дата', 'Тип', 'Категория', 'Сумма, €', 'Кто', 'Из чьих денег', 'Комментарий', 'Чеков'].map(esc).join(';')];
+  const head = ro ? ['Data', 'Tip', 'Categorie', 'Suma, €', 'Suma, lei', 'Cursul BNM', 'Cine', 'Comentariu', 'Bonuri'] : ['Дата', 'Тип', 'Категория', 'Сумма, €', 'Сумма, lei', 'Курс НБМ', 'Кто', 'Комментарий', 'Чеков'];
+  const lines = [head.map(esc).join(';')];
   for (const e of entries) {
-    lines.push([e.entry_date, kinds[e.kind], e.category || '', String(e.amount).replace('.', ','), e.author,
-      e.kind === 'out' ? (e.source === 'pool' ? 'общие' : 'свои') : '', e.note || '', e.receipts].map(esc).join(';'));
+    lines.push([e.entry_date, kinds[e.kind], (ro && CAT_RO[e.category]) || e.category || '', String(e.amount).replace('.', ','),
+      e.orig_currency === 'MDL' ? String(e.orig_amount).replace('.', ',') : '', e.orig_currency === 'MDL' && e.rate ? String(e.rate).replace('.', ',') : '',
+      e.author, e.note || '', e.receipts].map(esc).join(';'));
   }
   const body = '﻿' + lines.join('\r\n');
   const fname = encodeURIComponent(`${object.name}.csv`);
@@ -1351,6 +1645,18 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/healthz') return send(res, 200, { ok: true });
     let m;
     if (req.method === 'POST' && pathname === '/tg/webhook') return await handleWebhook(req, res);
+    if (req.method === 'GET' && (m = pathname.match(/^\/r\/([\w-]+)\.csv$/))) {
+      const link = await db.one('SELECT object_id, lang FROM report_links WHERE token = $1 AND expires_at > now()', [m[1]]);
+      if (!link) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Linkul a expirat. / Ссылка устарела.'); }
+      return await serveExport(req, res, link.object_id, true, link.lang);
+    }
+    if (req.method === 'GET' && (m = pathname.match(/^\/r\/([\w-]+)$/))) {
+      const link = await db.one('SELECT object_id, lang FROM report_links WHERE token = $1 AND expires_at > now()', [m[1]]);
+      if (!link) { res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end('<p style="font-family:sans-serif;padding:24px">Linkul a expirat. / Ссылка устарела.</p>'); }
+      const html = await reportHtml(link.object_id, link.lang, `/r/${m[1]}.csv`);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+      return res.end(html);
+    }
     if (req.method === 'GET' && (m = pathname.match(/^\/a\/([\w-]+)$/))) {
       const link = await db.one('SELECT advance_id FROM advance_links WHERE token = $1 AND expires_at > now()', [m[1]]);
       if (!link) { res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end('<p style="font-family:sans-serif;padding:24px">Linkul a expirat. / Ссылка устарела.</p>'); }

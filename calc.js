@@ -29,6 +29,8 @@ function computeObject(object, members, entries, advances = []) {
     return cats[key];
   };
 
+  let rentTotal = 0;
+  const rentHeld = {};
   for (const e of entries) {
     const amount = n(e.amount);
     const uid = e.user_id;
@@ -44,6 +46,9 @@ function computeObject(object, members, entries, advances = []) {
     } else if (e.kind === 'plan') {
       planTotal += amount;
       catOf(e.category).plan += amount;
+    } else if (e.kind === 'rent') {
+      rentTotal += amount;
+      rentHeld[uid] = (rentHeld[uid] || 0) + amount;
     }
   }
 
@@ -62,7 +67,11 @@ function computeObject(object, members, entries, advances = []) {
   // Деньги на руках у того, кто получил аванс — во взаиморасчёте он делится ими с остальными по долям.
   let advanceKept = 0;
   let advanceActive = 0;
-  const heldCash = {};
+  const heldCash = { ...rentHeld };
+  // Старые «взносы» (без общего котла) считаем деньгами у создателя объекта
+  if (totalIn > 0 && object.creator_id !== undefined && object.creator_id !== null) {
+    heldCash[Number(object.creator_id)] = (heldCash[Number(object.creator_id)] || 0) + totalIn;
+  }
   for (const a of advances) {
     const amount = n(a.amount);
     if (a.status === 'kept') {
@@ -75,8 +84,11 @@ function computeObject(object, members, entries, advances = []) {
     (a, b) => idx(a.category) - idx(b.category)
   );
   const forecastCosts = categories.reduce((s, c) => s + Math.max(c.plan, c.fact), 0);
-  const salePrice = object.sale_price === null || object.sale_price === undefined ? null : n(object.sale_price);
-  const profit = salePrice === null ? null : salePrice - forecastCosts + advanceKept;
+  // Сделка закрыта — считаем по фактической цене и фактическим затратам, иначе — прогноз.
+  const closed = object.sold_price !== null && object.sold_price !== undefined && object.sold_price !== '';
+  const salePrice = closed ? n(object.sold_price) : object.sale_price === null || object.sale_price === undefined ? null : n(object.sale_price);
+  const income = advanceKept + rentTotal;
+  const profit = salePrice === null ? null : salePrice - (closed ? factTotal : forecastCosts) + income;
   const totalInvested = Object.values(invested).reduce((s, v) => s + v, 0);
 
   // Распределение прибыли: сначала прораб(ы), остаток — инвесторам по долям.
@@ -106,8 +118,8 @@ function computeObject(object, members, entries, advances = []) {
   // Кто вложил больше своей доли — получает, кто меньше — доплачивает.
   const settlement = [];
   const net = (uid) => (invested[uid] || 0) - (heldCash[uid] || 0);
-  const totalNet = totalInvested - advanceKept;
-  if (shareSum > 0 && (totalInvested > 0 || advanceKept > 0)) {
+  const totalNet = totalInvested - Object.values(heldCash).reduce((x, v) => x + v, 0);
+  if (!closed && shareSum > 0 && (totalInvested > 0 || advanceKept > 0 || rentTotal > 0)) {
     const bal = [];
     for (const m of members) {
       const target = m.role === 'investor' ? (totalNet * n(m.share_pct)) / shareSum : 0;
@@ -130,6 +142,35 @@ function computeObject(object, members, entries, advances = []) {
     }
   }
 
+  // Закрытие сделки: у каждого должно остаться «вложил + его прибыль».
+  // Сейчас на руках: аванс/аренда у получивших, деньги от покупателя — у receiver.
+  let closing = null;
+  if (closed && profit !== null) {
+    const receiver = object.sold_receiver_id === null || object.sold_receiver_id === undefined ? null : Number(object.sold_receiver_id);
+    const rows = members.filter((m) => m.role !== 'viewer').map((m) => {
+      const uid = Number(m.user_id);
+      const target = (invested[uid] || 0) + (payout[uid] || 0);
+      const cash = (heldCash[uid] || 0) + (receiver === uid ? salePrice : 0);
+      return { user_id: uid, invested: round2(invested[uid] || 0), profit: round2(payout[uid] || 0), total: round2(target), cash: round2(cash), diff: round2(cash - target) };
+    });
+    const payers = rows.filter((r) => r.diff >= 1).map((r) => ({ ...r }));
+    const takers = rows.filter((r) => r.diff <= -1).map((r) => ({ ...r, diff: -r.diff }));
+    payers.sort((x, y) => y.diff - x.diff);
+    takers.sort((x, y) => y.diff - x.diff);
+    const transfers = [];
+    let i = 0;
+    let j = 0;
+    while (i < payers.length && j < takers.length) {
+      const amt = Math.min(payers[i].diff, takers[j].diff);
+      if (amt >= 1) transfers.push({ from: payers[i].user_id, to: takers[j].user_id, amount: round2(amt) });
+      payers[i].diff -= amt;
+      takers[j].diff -= amt;
+      if (payers[i].diff < 1) i++;
+      if (takers[j].diff < 1) j++;
+    }
+    closing = { rows, transfers, receiver };
+  }
+
   return {
     invested,
     totalIn: round2(totalIn),
@@ -138,6 +179,9 @@ function computeObject(object, members, entries, advances = []) {
     factTotal: round2(factTotal),
     planTotal: round2(planTotal),
     advanceKept: round2(advanceKept),
+    rentTotal: round2(rentTotal),
+    closed,
+    closing,
     advanceActive: round2(advanceActive),
     categories,
     forecastCosts: round2(forecastCosts),

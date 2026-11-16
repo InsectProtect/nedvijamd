@@ -184,3 +184,39 @@ CREATE TABLE IF NOT EXISTS advance_links (
   advance_id INT NOT NULL REFERENCES advances(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Аренда, исправления операций, суммы в леях
+ALTER TABLE entries DROP CONSTRAINT IF EXISTS entries_kind_check;
+ALTER TABLE entries ADD CONSTRAINT entries_kind_check CHECK (kind IN ('in', 'out', 'plan', 'rent'));
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS orig_amount NUMERIC;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS orig_currency TEXT;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS rate NUMERIC;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS edit_proposal JSONB;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS edit_requested_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS entry_edit_votes (
+  entry_id INT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (entry_id, user_id)
+);
+
+-- Закрытие сделки
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS sold_price NUMERIC;
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS sold_at DATE;
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS sold_receiver_id INT REFERENCES users(id);
+CREATE TABLE IF NOT EXISTS deal_payouts (
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  from_user INT NOT NULL REFERENCES users(id),
+  to_user INT NOT NULL REFERENCES users(id),
+  amount NUMERIC NOT NULL,
+  paid_at TIMESTAMPTZ,
+  marked_by INT REFERENCES users(id),
+  PRIMARY KEY (object_id, from_user, to_user)
+);
+
+-- Ссылки на отчёт
+CREATE TABLE IF NOT EXISTS report_links (
+  token TEXT PRIMARY KEY,
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  lang TEXT NOT NULL DEFAULT 'ru',
+  expires_at TIMESTAMPTZ NOT NULL
+);

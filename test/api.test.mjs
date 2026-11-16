@@ -195,7 +195,7 @@ ok(r.status === 200, 'advance kept');
 let after = (await A('GET', `/api/objects/${oid}`)).data;
 ok(after.calc.profit === profit0 + 2000 && after.calc.advanceKept === 2000, 'kept advance adds to profit: ' + after.calc.profit);
 ok(after.members.find((m) => m.name.startsWith('Денис')).invested === denInv0, 'holder investment unchanged');
-ok(JSON.stringify(after.calc.settlement) !== JSON.stringify(before.calc.settlement), 'kept advance cash is shared in settlement');
+ok(JSON.stringify(after.calc.settlement) !== JSON.stringify(before.calc.settlement), 'kept advance cash is shared in settlement: ' + JSON.stringify(before.calc.settlement) + ' / ' + JSON.stringify(after.calc.settlement));
 r = await D('POST', `/api/advances/${adv1}/status`, { status: 'returned' });
 ok(r.status === 400, 'closed advance cannot change');
 r = await D('POST', `/api/objects/${oid}/advances`, { amount: 1500, valid_until: '2020-01-01' });
@@ -255,6 +255,80 @@ r = await A('POST', `/api/entries/${bad}/delete-vote`, { agree: true });
 ok(r.data.deleted === true, 'all agreed → entry deleted');
 r = await A('GET', `/api/entries/${bad}`);
 ok(r.status === 404, 'entry gone');
+
+// аренда
+r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'rent', amount: 500 });
+ok(r.status === 403, 'foreman cannot add rent');
+let pre = (await A('GET', `/api/objects/${oid}`)).data.calc;
+r = await D('POST', `/api/objects/${oid}/entries`, { kind: 'rent', amount: 600, note: 'Аренда за ноябрь' });
+ok(r.status === 200, 'rent added');
+let post = (await A('GET', `/api/objects/${oid}`)).data.calc;
+ok(post.rentTotal === 600 && post.profit === pre.profit + 600 && post.factTotal === pre.factTotal, 'rent adds to profit, not to costs');
+
+// сумма в леях (курс вручную)
+r = await A('POST', `/api/objects/${oid}/entries`, { kind: 'out', category: 'Ремонт', currency: 'MDL', orig_amount: 1960, rate: 19.6, note: 'Краска' });
+const lei = r.data.id;
+r = await A('GET', `/api/entries/${lei}`);
+ok(r.data.entry.amount === 100 && r.data.entry.orig_amount === 1960 && r.data.entry.orig_currency === 'MDL', 'lei converted by rate: ' + r.data.entry.amount);
+
+// исправление операции с согласия всех
+r = await D('POST', `/api/entries/${lei}/edit`, { amount: 200 });
+ok(r.status === 403, 'only author proposes edit');
+r = await A('POST', `/api/entries/${lei}/edit`, { amount: 150, category: 'Ремонт', note: 'Краска и грунт' });
+ok(r.data.pending === true, 'edit proposal pending');
+r = await D('GET', `/api/objects/${oid}`);
+ok(r.data.entries.find((e) => e.id === lei).need_my_edit_vote === true, 'partner sees edit needing vote');
+r = await D('GET', `/api/entries/${lei}`);
+ok(r.data.edit && r.data.edit.proposal.amount === 150 && r.data.entry.amount === 100, 'old value kept until approved');
+r = await A('DELETE', `/api/entries/${lei}`);
+ok(r.status === 400, 'no delete while edit pending');
+await D('POST', `/api/entries/${lei}/edit-vote`, { agree: true });
+r = await I('POST', `/api/entries/${lei}/edit-vote`, { agree: true });
+ok(r.data.applied === true, 'edit applied after all agreed');
+r = await A('GET', `/api/entries/${lei}`);
+ok(r.data.entry.amount === 150 && r.data.entry.note === 'Краска и грунт' && !r.data.edit, 'entry updated');
+await A('POST', `/api/entries/${lei}/edit`, { amount: 999 });
+r = await I('POST', `/api/entries/${lei}/edit-vote`, { agree: false });
+ok(r.data.cancelled === true, 'any refusal cancels edit');
+r = await A('GET', `/api/entries/${lei}`);
+ok(r.data.entry.amount === 150, 'refused edit not applied');
+
+// отчёт
+r = await B('GET', `/api/objects/${oid}/report?lang=ro`);
+ok(r.status === 200 && r.data.html.includes('Raport pe obiect') && r.data.html.includes('Venit din chirie'), 'report in Romanian');
+r = await A('POST', `/api/objects/${oid}/report-link`, { lang: 'ru' });
+const rl = await fetch(BASE + '/r/' + r.data.url.split('/r/')[1]);
+ok(rl.status === 200 && (await rl.text()).includes('Отчёт по объекту'), 'printable report link');
+
+// закрытие сделки
+r = await D('POST', `/api/objects/${oid}/close`, { sold_price: 110000, receiver_id: ids['Артём'] });
+ok(r.status === 403, 'only creator closes deal');
+r = await A('POST', `/api/objects/${oid}/close`, { sold_price: 110000, receiver_id: ids['Бухгалтер'] || 999999 });
+ok(r.status === 400, 'receiver must be a deal participant');
+r = await A('POST', `/api/objects/${oid}/close`, { sold_price: 110000, sold_at: '2026-12-01', receiver_id: ids['Артём'] });
+ok(r.status === 200, 'deal closed');
+r = await D('GET', `/api/objects/${oid}`);
+const deal = r.data.deal;
+ok(r.data.object.status === 'продана' && deal && deal.transfers.length > 0 && !deal.outdated, 'deal with transfers');
+const sumT = deal.transfers.filter((t) => t.from === ids['Артём']).reduce((x, t) => x + t.amount, 0);
+const totals = deal.rows.reduce((x, rr) => x + rr.total, 0);
+ok(Math.abs(totals - (r.data.calc.totalInvested + r.data.calc.profit)) < 2, 'everyone gets investment + profit');
+const myT = deal.transfers.find((t) => t.to === ids['Денис'] || t.from === ids['Денис']);
+r = await I('POST', `/api/objects/${oid}/payouts/mark`, { from: myT.from, to: myT.to, paid: true });
+ok(r.status === 403 || myT.from === ids['Игорь'] || myT.to === ids['Игорь'], 'third party cannot mark payout');
+r = await D('POST', `/api/objects/${oid}/payouts/mark`, { from: myT.from, to: myT.to, paid: true });
+ok(r.status === 200, 'payout marked');
+r = await A('GET', `/api/objects/${oid}`);
+ok(r.data.deal.transfers.find((t) => t.from === myT.from && t.to === myT.to).paid_at, 'payout shows as paid');
+await A('POST', `/api/objects/${oid}/entries`, { kind: 'out', category: 'Налоги', amount: 500 });
+r = await A('GET', `/api/objects/${oid}`);
+ok(r.data.deal.outdated === true, 'new expense after close marks deal outdated');
+await A('POST', `/api/objects/${oid}/recalc`);
+r = await A('GET', `/api/objects/${oid}`);
+ok(r.data.deal.outdated === false, 'recalc refreshes payouts');
+r = await A('POST', `/api/objects/${oid}/reopen`);
+r = await A('GET', `/api/objects/${oid}`);
+ok(r.data.deal === null && r.data.object.status === 'продаётся', 'deal reopened');
 
 // удаление
 r = await D('POST', `/api/objects/${oid}/delete-request`);
