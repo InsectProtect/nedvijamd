@@ -54,6 +54,7 @@ const I = {
   camera: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   gallery: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-9 9"/></svg>',
   check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+  deals: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18M11 12.5v1.5h2v-1.5"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M7 8l5-5 5 5"/></svg>'
 };
 
@@ -123,6 +124,7 @@ const tabbar = (active, plusHref) => `
   <nav class="tabbar" aria-label="Навигация">
     <a href="#/" class="${active === 'home' ? 'on' : ''}" aria-label="Объекты">${I.grid}</a>
     ${plusHref ? `<a href="${plusHref}" class="plus" aria-label="Добавить">${I.plus}</a>` : ''}
+    <a href="#/market" class="${active === 'market' ? 'on' : ''}" aria-label="Сделки">${I.deals}</a>
     <a href="#/profile" class="${active === 'profile' ? 'on' : ''}" aria-label="Профиль">${I.user}</a>
   </nav>`;
 
@@ -324,6 +326,9 @@ async function viewHome() {
         ${active.some((o) => o.my_profit !== null) ? `<div class="chip">${I.trend}Прибыль ≈ ${signed(t.profit)} €</div>` : ''}
         ${history.length ? `<div class="chip" style="color:#8FC9A3">${I.check}Заработано ${signed(t.earned)} €</div>` : ''}
       </div>
+      ${active.length ? '' : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+        <span class="gold" style="display:inline-flex;width:28px;height:28px">${I.deals}</span>
+        <div style="flex:1"><div style="font-size:15px;font-weight:600">Хочу стать инвестором</div><div class="muted" style="font-size:12px;line-height:1.4;margin-top:2px">Есть деньги — найдите сделку. Есть объект — найдите инвестора.</div></div>${I.chev}</a>`}
       <div class="section-h"><h2>Объекты</h2><a class="pill" href="#/new">${I.plusSm}Объект</a></div>
       ${list || (history.length ? '<div class="card empty">Все сделки закрыты. Создайте новый объект.</div>' : `<div class="card empty">Пока нет объектов.<br>Создайте первый и пригласите партнёров по ссылке.<div style="margin-top:16px"><a class="btn sm" href="#/new" style="display:inline-flex">Создать объект</a></div></div>`)}
       ${history.length ? `<details class="fold" data-fold="home-history" style="margin-top:22px" ${foldOpen('home-history', true) ? 'open' : ''}>
@@ -1682,7 +1687,286 @@ async function viewDelete(id) {
 }
 
 // ---------- роутер ----------
+// ---------- доска сделок ----------
+const OFFER_STATUS = { pending: 'на проверке', approved: 'опубликовано', rejected: 'не опубликовано', closed: 'снято' };
+const offerStatusBadge = (s) => `<span class="badge ${s === 'approved' ? 'green' : s === 'rejected' ? 'red' : s === 'pending' ? 'gold' : ''}">${OFFER_STATUS[s] || s}</span>`;
+const dealsLine = (n) => (n ? `${n} ${plural(n, 'закрытая сделка', 'закрытые сделки', 'закрытых сделок')} в Доле` : 'новичок в Доле');
+const rangeText = (from, to) => (from ? `${fmt(from)} – ${fmt(to)} €` : `до ${fmt(to)} €`);
+
+function contactBlock(c) {
+  if (!c) return '';
+  const links = [];
+  if (c.telegram) links.push(`<button class="btn sm" data-ext="${esc(c.telegram)}" style="flex:1">Написать в Telegram</button>`);
+  if (c.phone) links.push(`<a class="btn ghost sm" href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}" style="flex:1">${esc(c.phone)}</a>`);
+  if (!links.length && c.email) links.push(`<a class="btn ghost sm" href="mailto:${esc(c.email)}" style="flex:1">${esc(c.email)}</a>`);
+  return `<div class="card green" style="margin-top:10px"><div style="font-size:12px;color:#8FC9A3">Контакты открыты</div>
+    <div style="font-size:15px;font-weight:500;margin-top:4px">${esc(c.name)}${c.tg_username ? ` <span class="muted" style="font-weight:400">@${esc(c.tg_username)}</span>` : ''}</div>
+    ${links.length ? `<div class="btn-row" style="margin-top:10px">${links.join('')}</div>` : '<div class="muted" style="font-size:12px;margin-top:6px">Контактов в профиле нет — договоритесь через бота или общих знакомых.</div>'}</div>`;
+}
+function bindExt() { on('[data-ext]', 'click', (e) => openExternal(e.currentTarget.dataset.ext)); }
+
+async function viewMarket(tab) {
+  tab = tab === 'investors' ? 'investors' : 'deals';
+  const d = await api('GET', '/api/market');
+  state.market = d;
+  const myApproved = d.offers.filter((o) => o.mine && o.status === 'approved');
+  const offerCard = (o) => `
+    <a class="card" href="#/market/o/${o.id}" style="display:block;margin-top:10px;color:var(--text)">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-nt style="font-size:16px;font-weight:600">${esc(o.title)}</span>${o.mine ? offerStatusBadge(o.status) : ''}${o.my_response ? `<span class="badge ${o.my_response === 'accepted' ? 'green' : ''}">${o.my_response === 'accepted' ? 'контакты открыты' : o.my_response === 'declined' ? 'отклонено' : 'вы откликнулись'}</span>` : ''}</div>
+      ${o.district ? `<div class="muted" data-nt style="font-size:13px;margin-top:4px">${esc(o.district)}</div>` : ''}
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:12px">
+        <div><div class="muted" style="font-size:12px">Нужно от инвестора</div><div class="display num" style="font-size:20px;font-weight:600">${money(o.need_amount)}</div></div>
+        <div style="text-align:right">${o.expected_pct !== null ? `<div class="gold num" style="font-size:15px;font-weight:500">≈ ${pct(o.expected_pct)}</div>` : ''}${o.term_months ? `<div class="muted" style="font-size:12px">${o.term_months} ${plural(o.term_months, 'месяц', 'месяца', 'месяцев')}</div>` : ''}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">${avatar(o.user_id, o.author, 'sm')}<span style="font-size:13px">${esc(o.author)}</span><span class="muted" style="font-size:12px;margin-left:auto">${o.mine ? (o.responses ? `откликов: ${o.responses}` : 'откликов пока нет') : dealsLine(o.author_deals)}</span></div>
+    </a>`;
+  const investorCard = (i) => `
+    <div class="card" style="margin-top:10px">
+      <div style="display:flex;align-items:center;gap:12px">${avatar(i.user_id, i.name)}
+        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:500">${esc(i.name)}</div><div class="muted" style="font-size:12px">${dealsLine(i.deals)}</div></div>
+        <div class="display num" style="font-weight:600;font-size:16px;white-space:nowrap">${rangeText(i.amount_from, i.amount_to)}</div></div>
+      ${i.note ? `<div data-nt style="font-size:13px;line-height:1.45;color:#B5B5BA;margin-top:10px">${esc(i.note)}</div>` : ''}
+      ${myApproved.length ? `<button class="btn ghost sm" data-propose="${i.user_id}" style="width:100%;margin-top:12px">Предложить сделку</button>` : ''}
+    </div>`;
+  const mp = d.my_profile;
+  const myProfileCard = mp
+    ? `<a class="card ${mp.status === 'approved' ? 'green' : ''}" href="#/market/profile" style="display:flex;align-items:center;gap:12px;margin-top:14px;color:var(--text)">
+        <div style="flex:1"><div style="font-size:12px" class="${mp.status === 'approved' ? '' : 'muted'}">${mp.status === 'approved' ? 'Моя анкета инвестора опубликована' : mp.status === 'pending' ? 'Моя анкета на проверке' : 'Анкета не опубликована'}</div>
+        <div style="font-size:16px;font-weight:600;margin-top:4px" class="num">${rangeText(mp.amount_from, mp.amount_to)}</div>
+        ${mp.status === 'rejected' && mp.reject_reason ? `<div class="red" style="font-size:12px;margin-top:4px">${esc(mp.reject_reason)}</div>` : ''}</div>${I.chev}</a>`
+    : `<div class="card" style="margin-top:14px;background:linear-gradient(135deg,#221E16,#17171A)">
+        <div style="font-size:17px;font-weight:600">Есть деньги — хотите заработать?</div>
+        <div style="font-size:13px;line-height:1.5;color:#B5B5BA;margin-top:6px">Заполните анкету: сколько готовы вложить. Авторы сделок увидят её и предложат вам объекты, а вы откликайтесь на сделки ниже.</div>
+        <a class="btn sm" href="#/market/profile" style="margin-top:14px;display:flex">Хочу стать инвестором</a></div>`;
+  const deals = d.offers.filter((o) => o.status === 'approved' && !o.mine);
+  const mine = d.offers.filter((o) => o.mine && o.status !== 'closed');
+  app.innerHTML = `
+    <div class="screen">
+      <div class="topbar"><div class="logo">Сделки</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
+      <div class="lead" style="margin-top:6px">Доска совместных инвестиций: авторы предлагают объекты, инвесторы вкладывают деньги. Всё публикуется после проверки, контакты открываются, когда обе стороны согласны.</div>
+      ${d.inbox ? `<a class="card gold-b" href="#/market/inbox" style="display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--text);border-color:#5A4E33"><span style="flex:1;font-size:14px">Ждут вашего ответа: <b class="gold">${d.inbox}</b></span>${I.chev}</a>` : `<a href="#/market/inbox" class="muted" style="display:block;font-size:13px;margin-top:12px">Мои отклики и предложения →</a>`}
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:16px"><button data-mt="deals" class="${tab === 'deals' ? 'on' : ''}">Сделки · ${deals.length}</button><button data-mt="investors" class="${tab === 'investors' ? 'on' : ''}">Инвесторы · ${d.investors.length}</button></div>
+      ${tab === 'deals' ? `
+        ${myProfileCard}
+        <div class="section-h"><h2>Предложения</h2><a class="pill" href="#/market/new">${I.plusSm}Предложить сделку</a></div>
+        ${mine.length ? `<div class="label" style="margin-top:4px">Мои предложения</div>${mine.map(offerCard).join('')}<div class="label">От других</div>` : ''}
+        ${deals.length ? deals.map(offerCard).join('') : '<div class="card empty">Пока нет опубликованных сделок. Предложите свою — инвесторы увидят её после проверки.</div>'}`
+      : `
+        ${myProfileCard}
+        <div class="section-h"><h2>Инвесторы</h2></div>
+        ${myApproved.length ? '' : '<div class="muted" style="font-size:12px;line-height:1.45;margin-bottom:4px">Чтобы предложить сделку инвестору, сначала опубликуйте её во вкладке «Сделки».</div>'}
+        ${d.investors.length ? d.investors.map(investorCard).join('') : '<div class="card empty">Пока нет опубликованных анкет инвесторов.</div>'}`}
+    </div>
+    ${tabbar('market', null)}`;
+  on('[data-mt]', 'click', (e) => go(e.currentTarget.dataset.mt === 'investors' ? '#/market/investors' : '#/market'));
+  on('[data-propose]', 'click', (e) => proposeSheet(Number(e.currentTarget.dataset.propose), myApproved));
+}
+
+function proposeSheet(investorId, offers) {
+  const inv = state.market.investors.find((i) => i.user_id === investorId);
+  const sheet = document.createElement('div');
+  sheet.className = 'viewer sheet-bg';
+  sheet.innerHTML = `<div class="sheet" role="dialog" aria-label="Предложить сделку">
+    <div style="font-size:17px;font-weight:600">Предложить сделку</div>
+    <div class="muted" style="font-size:13px;margin-top:4px">${esc(inv.name)} · ${rangeText(inv.amount_from, inv.amount_to)}</div>
+    <div class="label">Какую сделку</div>
+    <div class="chips" style="flex-direction:column;align-items:stretch">${offers.map((o, k) => `<button data-of="${o.id}" class="${k === 0 ? 'on' : ''}" style="text-align:left">${esc(o.title)} · ${money(o.need_amount)}</button>`).join('')}</div>
+    <label class="label" for="pmsg">Сообщение (необязательно)</label><input class="field" id="pmsg" maxlength="500">
+    <div class="muted" style="font-size:12px;line-height:1.45;margin-top:8px">Инвестор получит уведомление. Если он согласится, вы оба увидите контакты друг друга.</div>
+    <div class="btn-row" style="margin-top:16px"><button class="btn ghost" id="pcancel" style="flex:1">Отмена</button><button class="btn" id="psend" style="flex:1">Отправить</button></div>
+  </div>`;
+  document.body.appendChild(sheet);
+  let chosen = offers[0].id;
+  sheet.querySelectorAll('[data-of]').forEach((b) => b.addEventListener('click', () => { chosen = Number(b.dataset.of); sheet.querySelectorAll('[data-of]').forEach((x) => x.classList.toggle('on', x === b)); }));
+  sheet.querySelector('#pcancel').onclick = () => sheet.remove();
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.remove(); });
+  sheet.querySelector('#psend').onclick = async () => {
+    try { await api('POST', `/api/market/investors/${investorId}/propose`, { offer_id: chosen, message: sheet.querySelector('#pmsg').value }); sheet.remove(); toast('Предложение отправлено', true); }
+    catch (ex) { toast(ex.message); }
+  };
+}
+
+async function viewMarketProfile() {
+  const d = await api('GET', '/api/market');
+  const p = d.my_profile || {};
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/market')}<div class="spacer44"></div></div>
+      <h1 class="h" style="margin-top:18px">Хочу стать инвестором</h1>
+      <div class="lead">Укажите, сколько готовы вложить. После проверки анкету увидят авторы сделок и смогут предложить вам объект. Ваши контакты откроются, только когда вы сами примете предложение.</div>
+      ${p.status ? `<div class="${p.status === 'rejected' ? 'warn' : 'card dashed'}" style="margin-top:14px;font-size:13px">${p.status === 'approved' ? 'Анкета опубликована. Если измените её, она снова уйдёт на проверку.' : p.status === 'pending' ? 'Анкета на проверке у администратора.' : `Анкета не опубликована${p.reject_reason ? ': ' + esc(p.reject_reason) : ''}. Исправьте и отправьте снова.`}</div>` : ''}
+      <form id="f" novalidate>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="label" for="afrom">От, €</label><input class="field" id="afrom" inputmode="numeric" value="${esc(p.amount_from ?? '')}" placeholder="необязательно"></div>
+          <div><label class="label" for="ato">До, €</label><input class="field" id="ato" inputmode="numeric" value="${esc(p.amount_to ?? '')}" placeholder="например 30000"></div>
+        </div>
+        <label class="label" for="anote">Комментарий (необязательно)</label>
+        <input class="field" id="anote" maxlength="500" value="${esc(p.note || '')}" placeholder="Например: Кишинёв, срок до года">
+        <button class="btn" style="margin-top:20px">${p.status ? 'Сохранить и отправить на проверку' : 'Отправить на проверку'}</button>
+      </form>
+      ${p.status ? '<button class="link-btn" id="del" style="display:block;margin:16px auto 0;color:var(--muted)">Убрать анкету с доски</button>' : ''}
+    </div>`;
+  const clean = (v) => v.replace(/\s/g, '');
+  app.querySelector('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/market/profile', { amount_from: clean(app.querySelector('#afrom').value), amount_to: clean(app.querySelector('#ato').value), note: app.querySelector('#anote').value });
+      toast('Анкета отправлена на проверку', true); go('#/market/investors');
+    } catch (ex) { toast(ex.message); }
+  };
+  const del = app.querySelector('#del');
+  if (del) del.onclick = async () => { if (!ask('Убрать анкету инвестора с доски?')) return; try { await api('DELETE', '/api/market/profile'); go('#/market'); } catch (ex) { toast(ex.message); } };
+}
+
+async function viewOfferForm(id) {
+  let o = {};
+  if (id) { o = (await api('GET', `/api/market/offers/${id}`)).offer; if (!o.mine) return go(`#/market/o/${id}`); }
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(id ? `#/market/o/${id}` : '#/market', 'Закрыть')}<div class="title"><b>${id ? 'Изменить предложение' : 'Предложить сделку'}</b><small>публикуется после проверки</small></div><div class="spacer44"></div></div>
+      <form id="f" novalidate>
+        <label class="label" for="ttl">Объект</label><input class="field" id="ttl" maxlength="120" value="${esc(o.title || '')}" placeholder="Например: 2 комнаты под ремонт и продажу">
+        <label class="label" for="dst">Район, город</label><input class="field" id="dst" maxlength="120" value="${esc(o.district || '')}" placeholder="Ботаника, Кишинёв">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="label" for="prc">Цена объекта, €</label><input class="field" id="prc" inputmode="numeric" value="${esc(o.price ?? '')}"></div>
+          <div><label class="label" for="need">Нужно от инвестора, €</label><input class="field" id="need" inputmode="numeric" value="${esc(o.need_amount ?? '')}"></div>
+          <div><label class="label" for="pctv">Ожидаемая доходность, %</label><input class="field" id="pctv" inputmode="decimal" value="${esc(o.expected_pct ?? '')}"></div>
+          <div><label class="label" for="term">Срок, месяцев</label><input class="field" id="term" inputmode="numeric" value="${esc(o.term_months ?? '')}"></div>
+        </div>
+        <label class="label" for="dsc">Описание</label>
+        <textarea class="field" id="dsc" maxlength="2000" rows="5" style="height:auto;padding-top:12px;line-height:1.45" placeholder="Что за объект, план: покупка, ремонт, продажа или аренда; кто ведёт ремонт; как делится прибыль">${esc(o.description || '')}</textarea>
+        <div class="card dashed" style="margin-top:14px;font-size:12px;line-height:1.5;color:#B5B5BA">Предложение увидят все пользователи Доли после проверки администратором. Ваши контакты откроются только тому инвестору, чей отклик вы примете. Доходность — ваш прогноз, а не гарантия.</div>
+        <button class="btn" style="margin-top:18px">${id ? 'Сохранить и отправить на проверку' : 'Отправить на проверку'}</button>
+      </form>
+    </div>`;
+  const v = (s) => app.querySelector(s).value.replace(/\s/g, '').replace(',', '.');
+  app.querySelector('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { title: app.querySelector('#ttl').value, district: app.querySelector('#dst').value, description: app.querySelector('#dsc').value, price: v('#prc'), need_amount: v('#need'), expected_pct: v('#pctv'), term_months: v('#term') };
+    try {
+      const r = id ? await api('PUT', `/api/market/offers/${id}`, body) : await api('POST', '/api/market/offers', body);
+      toast('Отправлено на проверку', true);
+      go(`#/market/o/${id || r.id}`);
+    } catch (ex) { toast(ex.message); }
+  };
+}
+
+async function viewOffer(id) {
+  const o = (await api('GET', `/api/market/offers/${id}`)).offer;
+  const mineResp = !o.mine ? o.responses[0] : null;
+  const respRow = (r) => `
+    <div class="card" style="margin-top:10px">
+      <div style="display:flex;align-items:center;gap:12px">${avatar(r.investor_id, r.name)}
+        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:500">${esc(r.name)}</div>
+        <div class="muted" style="font-size:12px">${r.initiator === 'owner' ? 'вы предложили' : 'отклик'} · ${dateRu(String(r.created_at).slice(0, 10))}${r.amount_to ? ` · ${rangeText(r.amount_from, r.amount_to)}` : ''}</div>
+        <div class="muted" style="font-size:12px">${dealsLine(r.deals)}</div></div>
+        <span class="badge ${r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'}">${r.status === 'accepted' ? 'принят' : r.status === 'declined' ? 'отклонён' : 'ждёт ответа'}</span></div>
+      ${r.message ? `<div data-nt style="font-size:13px;line-height:1.45;color:#B5B5BA;margin-top:10px">«${esc(r.message)}»</div>` : ''}
+      ${r.can_answer ? `<div class="btn-row" style="margin-top:12px"><button class="btn sm" data-ans="${r.id}" data-acc="1" style="flex:1">Принять — открыть контакты</button><button class="btn ghost sm" data-ans="${r.id}" data-acc="0" style="flex:none;padding:0 16px">Отклонить</button></div>` : ''}
+      ${r.contact ? contactBlock(r.contact) : ''}
+    </div>`;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/market')}<div class="spacer44"></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">${o.mine ? offerStatusBadge(o.status) : ''}</div>
+      <h1 class="h" data-nt style="margin-top:8px">${esc(o.title)}</h1>
+      ${o.district ? `<div class="h-sub" data-nt style="margin-top:4px">${esc(o.district)}</div>` : ''}
+      ${o.mine && o.status === 'rejected' && o.reject_reason ? `<div class="warn">Не опубликовано: ${esc(o.reject_reason)}. Исправьте и отправьте снова.</div>` : ''}
+      ${o.mine && o.status === 'pending' ? '<div class="card dashed" style="margin-top:12px;font-size:13px">На проверке у администратора. После публикации предложение увидят все инвесторы.</div>' : ''}
+      <div class="stats" style="margin-top:16px">
+        <div class="stat"><div class="k">Нужно</div><div class="v">${fmt(o.need_amount)}</div></div>
+        <div class="stat"><div class="k">Доходность</div><div class="v gold">${o.expected_pct !== null ? '≈ ' + pct(o.expected_pct) : '—'}</div></div>
+        <div class="stat"><div class="k">Срок</div><div class="v">${o.term_months ? `${o.term_months} мес.` : '—'}</div></div>
+      </div>
+      ${o.price ? `<div class="muted" style="font-size:13px;margin-top:10px">Цена объекта: <span class="num" style="color:var(--text)">${money(o.price)}</span></div>` : ''}
+      ${o.description ? `<div class="card" data-nt style="margin-top:14px;font-size:14px;line-height:1.55;white-space:pre-wrap">${esc(o.description)}</div>` : ''}
+      <div class="card" style="display:flex;align-items:center;gap:12px;margin-top:12px">${avatar(o.user_id, o.author)}<div><div style="font-size:15px;font-weight:500">${esc(o.author)}${o.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="muted" style="font-size:12px">${dealsLine(o.author_deals)}</div></div></div>
+      ${o.mine ? `
+        <div class="label" style="display:flex;justify-content:space-between"><span>Отклики инвесторов</span><span>${o.responses.length}</span></div>
+        ${o.responses.length ? o.responses.map(respRow).join('') : '<div class="card empty">Пока откликов нет. Можно самому предложить сделку инвестору во вкладке «Инвесторы».</div>'}
+        ${o.status !== 'closed' ? `<div class="btn-row" style="margin-top:20px"><a class="btn ghost sm" href="#/market/o/${o.id}/edit" style="flex:1">Изменить</a><button class="btn ghost sm" id="close" style="flex:1">Снять с доски</button></div>` : '<div class="muted" style="text-align:center;margin-top:20px;font-size:13px">Предложение снято с доски.</div>'}`
+      : mineResp ? `
+        <div class="label">${mineResp.initiator === 'owner' ? 'Автор предложил вам эту сделку' : 'Ваш отклик'}</div>
+        <div class="card" style="margin-top:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span class="muted" style="font-size:13px">${dateRu(String(mineResp.created_at).slice(0, 10))}</span><span class="badge ${mineResp.status === 'accepted' ? 'green' : mineResp.status === 'declined' ? 'red' : 'gold'}">${mineResp.status === 'accepted' ? 'контакты открыты' : mineResp.status === 'declined' ? 'отклонено' : mineResp.can_answer ? 'ждёт вашего ответа' : 'ждёт ответа автора'}</span></div>
+          ${mineResp.message ? `<div data-nt style="font-size:13px;line-height:1.45;color:#B5B5BA;margin-top:8px">«${esc(mineResp.message)}»</div>` : ''}
+          ${mineResp.can_answer ? `<div class="btn-row" style="margin-top:12px"><button class="btn sm" data-ans="${mineResp.id}" data-acc="1" style="flex:1">Принять — открыть контакты</button><button class="btn ghost sm" data-ans="${mineResp.id}" data-acc="0" style="flex:none;padding:0 16px">Отклонить</button></div>` : ''}
+          ${mineResp.contact ? contactBlock(mineResp.contact) : ''}
+        </div>
+        ${mineResp.status === 'declined' && o.status === 'approved' ? '<button class="btn ghost" id="respond" style="margin-top:14px">Откликнуться снова</button>' : ''}`
+      : o.status === 'approved' ? `
+        <label class="label" for="rmsg">Сообщение автору (необязательно)</label><input class="field" id="rmsg" maxlength="500" placeholder="Например: готов вложить 20 000 €">
+        <button class="btn" id="respond" style="margin-top:14px">Интересно — откликнуться</button>
+        <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px;text-align:center">Автор получит уведомление. Если он примет отклик, вы оба увидите контакты друг друга.</div>` : ''}
+      ${state.me.is_admin && o.status === 'pending' ? `<div class="label">Проверка</div><div class="btn-row"><button class="btn sm" data-mod="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-mod="0" style="flex:1">Отклонить</button></div>` : ''}
+    </div>`;
+  bindExt();
+  const rb = app.querySelector('#respond');
+  if (rb) rb.onclick = async () => {
+    const msg = app.querySelector('#rmsg');
+    try { await api('POST', `/api/market/offers/${id}/respond`, { message: msg ? msg.value : '' }); toast('Отклик отправлен автору', true); viewOffer(id); } catch (ex) { toast(ex.message); }
+  };
+  on('[data-ans]', 'click', async (e) => {
+    const acc = e.currentTarget.dataset.acc === '1';
+    if (!acc && !ask('Отклонить?')) return;
+    try { await api('POST', `/api/market/responses/${e.currentTarget.dataset.ans}/answer`, { accept: acc }); toast(acc ? 'Контакты открыты' : 'Отклонено', true); viewOffer(id); } catch (ex) { toast(ex.message); }
+  });
+  const cl = app.querySelector('#close');
+  if (cl) cl.onclick = async () => { if (!ask('Снять предложение с доски? Ожидающие отклики будут отклонены.')) return; try { await api('POST', `/api/market/offers/${id}/close`); go('#/market'); } catch (ex) { toast(ex.message); } };
+  on('[data-mod]', 'click', (e) => moderate('offer', id, e.currentTarget.dataset.mod === '1', () => viewOffer(id)));
+}
+
+async function moderate(kind, id, approve, after) {
+  let reason = '';
+  if (!approve) { reason = prompt(I18N.tr('Причина (автор её увидит):')); if (reason === null) return; }
+  try { await api('POST', `/api/market/admin/${kind}/${id}`, { approve, reason }); toast(approve ? 'Опубликовано' : 'Отклонено', true); after(); } catch (ex) { toast(ex.message); }
+}
+
+async function viewMarketInbox() {
+  const d = await api('GET', '/api/market/inbox');
+  const st = { pending: 'ждёт ответа', accepted: 'контакты открыты', declined: 'отклонено' };
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/market')}<div class="title"><b>Отклики и предложения</b></div><div class="spacer44"></div></div>
+      ${d.items.length ? `<div class="card list" style="margin-top:16px">${d.items.map((i) => `<a class="row" href="#/market/o/${i.offer_id}" style="color:var(--text)">
+        <div class="grow"><div class="t" data-nt style="font-size:14px">${esc(i.title)}</div>
+        <div class="s">${i.incoming ? (i.role === 'owner' ? 'Отклик от' : 'Вам предлагает') : (i.role === 'owner' ? 'Вы предложили' : 'Вы откликнулись')}: ${esc(i.other_name)}</div></div>
+        <div class="r">${i.can_answer ? '<span class="badge gold">ответить</span>' : `<span class="muted" style="font-size:12px">${st[i.status]}</span>`}</div></a>`).join('')}</div>`
+      : '<div class="empty">Пока нет откликов и предложений.</div>'}
+    </div>`;
+}
+
+async function viewMarketAdmin() {
+  if (!state.me.is_admin) return go('#/market');
+  const d = await api('GET', '/api/market/admin');
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/market')}<div class="title"><b>Проверка</b><small>доска сделок</small></div><div class="spacer44"></div></div>
+      <div class="label">Предложения сделок · ${d.offers.length}</div>
+      ${d.offers.length ? d.offers.map((o) => `<div class="card" style="margin-top:10px">
+        <a href="#/market/o/${o.id}" style="color:var(--text);font-size:15px;font-weight:600">${esc(o.title)}</a>
+        <div class="muted" style="font-size:12px;margin-top:4px">${esc(o.author)} · ${dealsLine(o.author_deals)}${o.district ? ' · ' + esc(o.district) : ''}</div>
+        <div style="font-size:13px;margin-top:6px">Нужно <b class="num">${money(o.need_amount)}</b>${o.expected_pct !== null ? ` · ≈ ${pct(o.expected_pct)}` : ''}${o.term_months ? ` · ${o.term_months} мес.` : ''}</div>
+        ${o.description ? `<div data-nt style="font-size:13px;line-height:1.45;color:#B5B5BA;margin-top:6px;white-space:pre-wrap">${esc(o.description)}</div>` : ''}
+        <div class="btn-row" style="margin-top:12px"><button class="btn sm" data-k="offer" data-id="${o.id}" data-ok="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-k="offer" data-id="${o.id}" data-ok="0" style="flex:1">Отклонить</button></div></div>`).join('') : '<div class="card empty">Нет новых предложений.</div>'}
+      <div class="label">Анкеты инвесторов · ${d.profiles.length}</div>
+      ${d.profiles.length ? d.profiles.map((p) => `<div class="card" style="margin-top:10px">
+        <div style="display:flex;align-items:center;gap:12px">${avatar(p.user_id, p.name)}<div style="flex:1"><div style="font-size:15px;font-weight:500">${esc(p.name)}</div><div class="muted" style="font-size:12px">${dealsLine(p.deals)}</div></div><b class="num">${rangeText(p.amount_from, p.amount_to)}</b></div>
+        ${p.note ? `<div data-nt style="font-size:13px;color:#B5B5BA;margin-top:8px">${esc(p.note)}</div>` : ''}
+        <div class="btn-row" style="margin-top:12px"><button class="btn sm" data-k="profile" data-id="${p.user_id}" data-ok="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-k="profile" data-id="${p.user_id}" data-ok="0" style="flex:1">Отклонить</button></div></div>`).join('') : '<div class="card empty">Нет новых анкет.</div>'}
+    </div>`;
+  on('[data-ok]', 'click', (e) => { const b = e.currentTarget.dataset; moderate(b.k, b.id, b.ok === '1', viewMarketAdmin); });
+}
+
 const routes = [
+  [/^#\/market$/, () => viewMarket('deals')],
+  [/^#\/market\/investors$/, () => viewMarket('investors')],
+  [/^#\/market\/profile$/, () => viewMarketProfile()],
+  [/^#\/market\/new$/, () => viewOfferForm()],
+  [/^#\/market\/inbox$/, () => viewMarketInbox()],
+  [/^#\/market\/admin$/, () => viewMarketAdmin()],
+  [/^#\/market\/o\/(\d+)$/, (m) => viewOffer(m[1])],
+  [/^#\/market\/o\/(\d+)\/edit$/, (m) => viewOfferForm(m[1])],
   [/^#\/login$/, () => viewAuth('login'), true],
   [/^#\/register$/, () => viewAuth('register'), true],
   [/^#\/join\/([\w-]+)$/, (m) => viewJoin(m[1]), true],

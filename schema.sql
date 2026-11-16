@@ -220,3 +220,41 @@ CREATE TABLE IF NOT EXISTS report_links (
   lang TEXT NOT NULL DEFAULT 'ru',
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Доска сделок: анкеты инвесторов, предложения сделок, отклики
+CREATE TABLE IF NOT EXISTS investor_profiles (
+  user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  amount_from NUMERIC,
+  amount_to NUMERIC NOT NULL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reject_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS market_offers (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  district TEXT,
+  description TEXT,
+  price NUMERIC,
+  need_amount NUMERIC NOT NULL,
+  expected_pct NUMERIC,
+  term_months INT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reject_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS market_responses (
+  id SERIAL PRIMARY KEY,
+  offer_id INT NOT NULL REFERENCES market_offers(id) ON DELETE CASCADE,
+  investor_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  initiator TEXT NOT NULL,
+  message TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  answered_at TIMESTAMPTZ,
+  UNIQUE (offer_id, investor_id)
+);

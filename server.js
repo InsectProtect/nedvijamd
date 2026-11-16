@@ -1539,6 +1539,8 @@ async function serveObjectPhoto(req, res, id) {
   res.end(buf);
 }
 
+require('./market')({ route, db, fail, str, num, tg, appUrl, PUBLIC_URL, fmtEur });
+
 async function serveExport(req, res, id, viaLink, lang) {
   if (!viaLink) {
     const user = await currentUser(req);
