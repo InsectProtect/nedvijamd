@@ -15,7 +15,7 @@ const BASE = 'http://localhost:3999';
     await p.screenshot({ path: `/tmp/sheet-${lang}.png` });
     await p.click('[data-act="entry"]'); await p.waitForSelector('[data-oid]'); await p.waitForTimeout(250); await p.screenshot({ path: `/tmp/sheet-pick-${lang}.png` });
     await p.click('[data-oid] >> nth=0'); await p.waitForSelector('#amt'); console.log(lang, 'ok   pick object → add screen', p.url().split('#')[1]);
-    await p.goto(BASE + '/#/'); await p.waitForSelector('.obj'); await p.click('.obj'); await p.waitForSelector('h1.h'); await p.click('#tb-plus'); await p.click('[data-act="entry"]'); await p.waitForSelector('#amt'); console.log(lang, 'ok   from object → direct add');
+    await p.goto(BASE + '/#/'); await p.waitForSelector('.obj'); await p.click('.obj'); await p.waitForSelector('h1.h'); await p.click('#tb-plus'); await p.waitForSelector('#amt'); console.log(lang, 'ok   from object → direct add');
     await p.goto(BASE + '/#/market'); await p.waitForSelector('.seg'); await p.click('#tb-plus'); await p.click('[data-act="investor"]'); await p.waitForSelector('#ato'); console.log(lang, 'ok   investor from market');
     await ctx.close();
   }

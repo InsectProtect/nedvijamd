@@ -12,7 +12,7 @@ const BASE = 'http://localhost:3999';
   const a = await mk(); await reg(a, 'Artiom', 'Dede');
   const oid = await a.evaluate(async () => (await (await fetch('/api/objects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'ДМЗ', area: 43, purchase_price: 75250, sale_price: 90300, status: 'продаётся' }) })).json()).id);
   await a.goto(`${BASE}/#/o/${oid}`); await a.waitForSelector('h1.h');
-  await a.click(`a[href="#/o/${oid}/advance"]`); await a.waitForSelector('#amt');
+  await a.click("#objmenu"); await a.click(`a.act[href="#/o/${oid}/advance"]`); await a.waitForSelector('#amt');
   await a.fill('#amt', '2000'); await a.fill('#buyer', 'Ion Rusu'); await a.click('[data-days="14"]');
   await a.click('details[data-fold="adv-form"] > summary');
   await a.fill('#b_idnp', '2003333333333'); await a.fill('#b_addr', 'or. Bălți, str. Independenței 5'); await a.fill('#b_phone', '+373 69 000000'); await a.fill('#b_city', 'mun. Chișinău');

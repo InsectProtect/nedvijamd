@@ -15,7 +15,7 @@ const sql = (q) => require('child_process').execSync(`psql -h /tmp -p 5433 -U po
   await reg(a, 'Артём', 'Попов'); await reg(d, 'Денис', 'Руссу');
   sql(`update users set is_admin = true where email = '${a.email}'`);
   await a.goto(BASE + '/#/profile'); await a.reload(); await a.waitForSelector('[data-pd]');
-  await a.click('[data-pd="1"]'); await a.waitForSelector('#pd');
+  await a.click('[data-pd="1"]'); await a.waitForSelector('details[data-fold="p-data"] summary'); await a.evaluate(() => { const d = document.querySelector('details[data-fold="p-data"]'); if (!d.open) d.open = true; }); await a.waitForSelector('#pd');
   await a.fill('#pd_phone', '+373 69 123456'); await a.fill('#pd_birth', '1990-05-01');
   await a.screenshot({ path: '/tmp/s-profile.png', fullPage: true });
   await d.reload(); await d.waitForTimeout(500);
@@ -60,7 +60,7 @@ const sql = (q) => require('child_process').execSync(`psql -h /tmp -p 5433 -U po
   const frame = d.frame({ url: /about:srcdoc/ }) || d.frames()[1];
   await frame.evaluate(() => document.querySelector('h2:last-of-type').scrollIntoView());
   await d.screenshot({ path: '/tmp/s4.png' });
-  await d.goto(`${BASE}/#/o/${oid}`); await d.waitForSelector('.icon-btn.ok'); await d.screenshot({ path: '/tmp/s5.png' });
+  await d.goto(`${BASE}/#/o/${oid}`); await d.waitForSelector('a.card.green[href$="/contract"]'); await d.screenshot({ path: '/tmp/s5.png' });
   console.log('ok   contract signed by both, green state visible');
   await b.close();
 })().catch((e) => { console.error('SIGN UI FAIL', e); process.exit(1); });

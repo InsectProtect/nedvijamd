@@ -164,9 +164,20 @@ function openActionSheet(objId) {
     go(a === 'object' ? '#/new' : a === 'offer' ? '#/market/new' : '#/market/profile');
   }));
 }
+// Денежные поля: «105000» → «105 000» при выходе из поля
+const MONEY_FIELDS = '#amt, #buy, #sale, #repair, #monthly, #price, #prc, #need, #afrom, #ato, [data-money]';
+const fmtMoneyInput = (el) => {
+  const raw = el.value.replace(/[\s\u00A0]/g, '');
+  if (!/^\d+([.,]\d{0,2})?$/.test(raw)) return;
+  const [i, f] = raw.split(/[.,]/);
+  el.value = i.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (f !== undefined ? ',' + f : '');
+};
+document.addEventListener('focusout', (e) => { if (e.target.matches && e.target.matches(MONEY_FIELDS)) fmtMoneyInput(e.target); });
+new MutationObserver(() => document.querySelectorAll(MONEY_FIELDS).forEach((el) => { if (!el.dataset.fmt && document.activeElement !== el) { el.dataset.fmt = '1'; fmtMoneyInput(el); } })).observe(document.getElementById('app'), { childList: true, subtree: true });
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('#tb-plus');
-  if (b) openActionSheet(b.dataset.obj ? Number(b.dataset.obj) : null);
+  if (b && b.dataset.obj) return go(`#/o/${b.dataset.obj}/add`);
+  if (b) openActionSheet(null);
 });
 
 function on(sel, ev, fn) {
@@ -252,6 +263,7 @@ function viewAuth(mode) {
         <input class="field" id="email" type="email" autocomplete="email" inputmode="email" required>
         <label class="label" for="pw">Пароль</label>
         <input class="field" id="pw" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}" required minlength="6">
+        ${reg ? '' : '<div style="text-align:right;margin-top:10px"><a href="#/forgot" style="font-size:14px">Забыли пароль?</a></div>'}
         <div class="err" id="err" role="alert"></div>
         <button class="btn" style="margin-top:12px">${reg ? 'Создать аккаунт' : 'Войти'}</button>
       </form>
@@ -350,8 +362,8 @@ async function viewHome() {
         ${o.installment ? `<div class="muted" style="font-size:12px;margin-top:6px">Рассрочка: осталось <span class="num" style="color:var(--text)">${money(o.installment.left)}</span></div>` : ''}
       </div>
       <div style="text-align:right;white-space:nowrap;flex:none">
-        <div class="display num" style="font-weight:600;font-size:15px">${money(o.my_invested)}</div>
-        ${o.my_profit !== null ? `<div class="gold num" style="font-size:12px;margin-top:4px">≈ ${signed(o.my_profit)} €</div>` : '<div class="muted" style="font-size:12px;margin-top:4px">нет прогноза</div>'}
+        ${o.my_invested > 0 ? `<div class="display num" style="font-weight:600;font-size:15px">${money(o.my_invested)}</div>` : '<div class="muted" style="font-size:13px">нет вложений</div>'}
+        ${o.my_profit !== null ? `<div class="gold num" style="font-size:12px;margin-top:4px">прогноз ${signed(o.my_profit)}\u00A0€</div>` : '<div class="muted" style="font-size:12px;margin-top:4px">нет прогноза</div>'}
       </div>
     </a>`).join('');
   app.innerHTML = `
@@ -367,13 +379,14 @@ async function viewHome() {
         ${active.some((o) => o.my_profit !== null) ? `<div class="chip">${I.trend}Прибыль ≈ ${signed(t.profit)} €</div>` : ''}
         ${history.length ? `<div class="chip" style="color:#8FC9A3">${I.check}Заработано ${signed(t.earned)} €</div>` : ''}
       </div>
-      ${active.length ? `<a class="card" href="#/market" style="display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:14px;padding-bottom:14px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
-        <span class="gold" style="display:inline-flex;width:24px;height:24px">${I.deals}</span>
-        <div style="flex:1;font-size:14px"><b style="font-weight:600">Доска объявлений</b> <span class="muted">· сделки и инвесторы</span></div>${I.chev}</a>` : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+      ${active.length ? '' : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
         <span class="gold" style="display:inline-flex;width:28px;height:28px">${I.deals}</span>
         <div style="flex:1"><div style="font-size:15px;font-weight:600">Хочу стать инвестором</div><div class="muted" style="font-size:12px;line-height:1.4;margin-top:2px">Есть деньги — найдите сделку. Есть объект — найдите инвестора.</div></div>${I.chev}</a>`}
-      <div class="section-h"><h2>Объекты</h2><a class="pill" href="#/new">${I.plusSm}Объект</a></div>
+      <div class="section-h"><h2>Объекты</h2></div>
       ${list || (history.length ? '<div class="card empty">Все сделки закрыты. Создайте новый объект.</div>' : `<div class="card empty">Пока нет объектов.<br>Создайте первый и пригласите партнёров по ссылке.<div style="margin-top:16px"><a class="btn sm" href="#/new" style="display:inline-flex">Создать объект</a></div></div>`)}
+      ${active.length ? `<a class="card" href="#/market" style="display:flex;align-items:center;gap:12px;margin-top:22px;padding-top:14px;padding-bottom:14px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+        <span class="gold" style="display:inline-flex;width:24px;height:24px">${I.deals}</span>
+        <div style="flex:1;font-size:14px"><b style="font-weight:600">Доска объявлений</b> <span class="muted">· сделки и инвесторы</span></div>${I.chev}</a>` : ''}
       ${history.length ? `<details class="fold" data-fold="home-history" style="margin-top:22px" ${foldOpen('home-history', true) ? 'open' : ''}>
         <summary><span class="chev" aria-hidden="true">${I.chev}</span><h2 style="font-size:17px;margin:0;flex:1">История сделок · ${history.length}</h2><span class="okc num" style="font-size:14px">${signed(t.earned)} €</span></summary>
         ${history.map(histRow).join('')}
@@ -600,7 +613,7 @@ function viewProfile() {
       <div class="label">Язык</div>
       ${langSwitch()}
       ${state.settings.personal_data ? `
-      <details class="card fold" data-fold="p-data" style="margin-top:20px" ${foldOpen('p-data', !(state.me.idnp || state.me.phone)) ? 'open' : ''}>
+      <details class="card fold" data-fold="p-data" style="margin-top:20px" ${foldOpen('p-data', false) ? 'open' : ''}>
       <summary><div style="flex:1"><div style="font-weight:500">Мои данные</div><div class="muted" style="font-size:12px;margin-top:2px">Телефон, дата рождения, IDNP, адрес</div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
       <form id="pd" novalidate>
         <label class="label" for="pd_phone" style="margin-top:0">Телефон</label>
@@ -806,8 +819,7 @@ function advanceBlock(d, id) {
   const history = closed.length ? `<details class="card fold" data-fold="adv-${id}" style="margin-top:10px" ${foldOpen('adv-' + id, false) ? 'open' : ''}>
       <summary><div style="flex:1"><div class="muted" style="font-size:13px">История авансов · ${closed.length}</div>${d.calc.advanceKept ? `<div style="font-size:13px;margin-top:2px">в прибыль: <b class="okc num">+${fmt(d.calc.advanceKept)}\u00A0€</b></div>` : ''}</div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
       <div class="rows">${closed.map((a) => `<a class="row" href="#/adv/${a.id}" style="padding:9px 0;color:var(--text)"><div class="grow"><div class="t" style="font-size:14px">${money(a.amount)}${a.buyer ? ` · ${esc(a.buyer)}` : ''}</div><div class="s">${dateRu(a.received_date)} · ${ADV_STATUS[a.status]}</div></div>${a.status === 'kept' ? `<span class="okc num" style="font-size:13px">+${fmt(a.amount)}\u00A0€</span>` : ''}</a>`).join('')}</div></details>` : '';
-  const addBtn = canAdd && !active.length ? `<a class="btn ghost sm" href="#/o/${id}/advance" style="margin-top:10px;width:100%">${I.plusSm}Аванс от покупателя</a>` : '';
-  return activeCards + history + addBtn;
+  return activeCards + history;
 }
 
 // Данные покупателя для договора аванса
@@ -959,7 +971,7 @@ async function viewObject(id, filter = 'all') {
     const title = e.note || e.category || KIND[e.kind];
     const sub = [e.kind === 'plan' ? 'план' : e.kind === 'in' ? 'взнос' : e.kind === 'rent' ? 'аренда' : null, e.kind === 'out' && e.note ? e.category : null, dateRu(e.entry_date)].filter(Boolean).join(' · ');
     const amt = (e.kind === 'in' ? `<span class="gold">+${fmt(e.amount)}\u00A0€</span>` : e.kind === 'rent' ? `<span class="okc">+${fmt(e.amount)}\u00A0€</span>` : e.kind === 'out' ? `−${fmt(e.amount)}\u00A0€` : `<span class="muted">${fmt(e.amount)}\u00A0€</span>`)
-      + (e.orig_currency === 'MDL' ? `<div class="muted" style="font-size:11px">${fmt(e.orig_amount)} lei</div>` : '');
+      + (e.orig_currency === 'MDL' ? `<div class="muted" style="font-size:12px">${fmt(e.orig_amount)} lei</div>` : '');
     return `<a class="row" href="#/e/${e.id}">${avatar(e.user_id, e.author)}
       <div class="grow"><div class="t" style="font-size:14px">${esc(title)}</div>
       <div class="s">${esc(sub)}${e.receipts ? ` · <span class="gold" style="display:inline-flex;align-items:center;gap:3px">${I.receipt}${e.receipts}</span>` : ''}</div>
@@ -970,13 +982,9 @@ async function viewObject(id, filter = 'all') {
   app.innerHTML = `
     <div class="screen">
       <div class="topbar">${backBtn(me.adminView ? '#/admin/objects' : '#/')}
-        <div style="display:flex;gap:8px">
-          ${me.isCreator ? `<a class="icon-btn" href="#/o/${id}/edit" aria-label="Редактировать объект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></a>` : ''}
-          <a class="icon-btn ${o.contract && o.contract.all_signed ? 'ok' : o.contract && o.contract.fixed ? 'pending' : ''}" href="#/o/${id}/contract" aria-label="Договор дольщиков">${o.contract && o.contract.fixed ? `<span class="dot-badge">${o.contract.all_signed ? '✓' : `${o.contract.signed}/${o.contract.total}`}</span>` : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></a>
-          <a class="icon-btn" href="#/o/${id}/delete" aria-label="Удаление и выгрузка">${I.more}</a>
-        </div>
+        <button type="button" class="icon-btn" id="objmenu" aria-label="Действия с объектом">${I.more}</button>
       </div>
-      ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
+      ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : ''}
       <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? (o.installment ? ` · в рассрочку за ${money(o.purchase_price)}` : ` · куплена за ${money(o.purchase_price)}`) : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
       ${me.adminView ? `<div class="warn" style="display:flex;gap:10px;align-items:center"><span style="display:inline-flex;width:20px;height:20px;flex:none">${I.shield}</span><span>Режим администратора: только просмотр. Вы не участник этой сделки, изменить ничего нельзя.</span></div>` : ''}
@@ -988,9 +996,9 @@ async function viewObject(id, filter = 'all') {
           <summary><div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Рассрочка</span><span style="font-size:13px">осталось <b class="num">${money(ins.left)}</b></span></div>
           <div class="bar" style="height:6px;margin-top:10px"><i style="width:${ins.pct}%"></i></div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
-            <div><div class="muted" style="font-size:11px">Выплачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.paid)}</div></div>
-            <div><div class="muted" style="font-size:11px">Осталось</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.left)}</div></div>
-            <div><div class="muted" style="font-size:11px">Всего</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.total)}</div></div>
+            <div><div class="muted" style="font-size:12px">Выплачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.paid)}</div></div>
+            <div><div class="muted" style="font-size:12px">Осталось</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.left)}</div></div>
+            <div><div class="muted" style="font-size:12px">Всего</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.total)}</div></div>
           </div>
           ${ins.total ? '' : '<div class="red" style="font-size:12px;margin-top:8px">Укажите стоимость покупки в настройках объекта</div>'}
           ${ins.payments_left !== null && ins.left > 0 ? `<div class="muted" style="font-size:12px;margin-top:8px">≈ ${ins.payments_left} ${plural(ins.payments_left, 'платёж', 'платежа', 'платежей')} по ${money(ins.monthly)}</div>` : ''}
@@ -1005,17 +1013,17 @@ async function viewObject(id, filter = 'all') {
           <summary><div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Ремонт</span><span style="font-size:13px" class="${over ? 'red' : ''}">${over ? 'перерасход' : rp.budget > 0 ? 'осталось' : 'потрачено'} <b class="num">${money(over ? -rp.left : rp.budget > 0 ? rp.left : rp.spent)}</b></span></div>
           <div class="bar" style="height:6px;margin-top:10px"><i class="${over ? 'over' : ''}" style="width:${rp.budget > 0 ? Math.min(100, rp.pct) : 100}%"></i></div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
-            <div><div class="muted" style="font-size:11px">Потрачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(rp.spent)}</div></div>
-            <div><div class="muted" style="font-size:11px">${over ? 'Перерасход' : 'Осталось'}</div><div class="display num ${over ? 'red' : ''}" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(Math.abs(rp.left)) : '—'}</div></div>
-            <div><div class="muted" style="font-size:11px">Ориентир</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(rp.budget) : '—'}</div></div>
+            <div><div class="muted" style="font-size:12px">Потрачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(rp.spent)}</div></div>
+            <div><div class="muted" style="font-size:12px">${over ? 'Перерасход' : 'Осталось'}</div><div class="display num ${over ? 'red' : ''}" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(Math.abs(rp.left)) : '—'}</div></div>
+            <div><div class="muted" style="font-size:12px">Ориентир</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(rp.budget) : '—'}</div></div>
           </div>
           <a class="link-btn" href="#/o/${id}/forecast" style="display:block;margin-top:6px">Все расходы по статьям →</a></details>`;
       })() : ''}
       ${advanceBlock(d, id)}
       <div class="stats">
-        <div class="stat"><div class="k">Вложено</div><div class="v">${fmt(c.totalInvested)}</div></div>
-        <div class="stat"><div class="k">Затраты · факт</div><div class="v gold">${fmt(c.factTotal)}</div></div>
-        <div class="stat"><div class="k">Затраты · план</div><div class="v">${fmt(c.planTotal)}</div></div>
+        <div class="stat"><div class="k">Потрачено</div><div class="v">${money(c.factTotal)}</div></div>
+        <div class="stat"><div class="k">По плану</div><div class="v">${money(c.planTotal)}</div></div>
+        <div class="stat"><div class="k">${c.factTotal > c.planTotal && c.planTotal ? 'Перерасход' : 'Осталось'}</div><div class="v ${c.factTotal > c.planTotal && c.planTotal ? 'red' : ''}">${money(Math.abs(c.planTotal - c.factTotal))}</div></div>
       </div>
 
       ${c.rentTotal ? `<div class="muted" style="font-size:12px;margin-top:8px">Аренда получено: <b class="okc num">+${fmt(c.rentTotal)}\u00A0€</b> · идёт в прибыль</div>` : ''}
@@ -1030,6 +1038,30 @@ async function viewObject(id, filter = 'all') {
              <div style="font-size:15px;font-weight:500;margin-top:4px">Прибыль ≈ <span class="${c.profit >= 0 ? 'gold' : 'red'} num">${signed(c.profit)} €</span>${c.roi !== null ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${pct(c.roi)}</span>` : ''}</div>`
           : `<div class="muted" style="font-size:12px">Прогноз продажи</div><div style="font-size:15px;margin-top:4px">План, факт и ${me.isCreator ? 'цена продажи' : 'прибыль'}</div>`}</div>${I.chev}
       </a>`}
+
+      <div class="section-h"><h2>Операции</h2></div>
+      <div class="chips" style="margin-bottom:6px">${filters.map(([k, l]) => `<button data-f="${k}" class="${k === filter ? 'on' : ''}">${l}</button>`).join('')}</div>
+      ${entries.length ? (() => {
+        if (entries.length <= 6) return `<div class="rows">${entries.map(entryRow).join('')}</div>`;
+        const groups = [];
+        for (const e of entries) {
+          const k = (e.entry_date || '').slice(0, 7);
+          let g = groups[groups.length - 1];
+          if (!g || g.k !== k) { g = { k, items: [] }; groups.push(g); }
+          g.items.push(e);
+        }
+        return groups.map((g, gi) => {
+          const sumOut = g.items.filter((e) => e.kind === 'out').reduce((s, e) => s + e.amount, 0);
+          const sumIn = g.items.filter((e) => e.kind === 'in' || e.kind === 'rent').reduce((s, e) => s + e.amount, 0);
+          const pending = g.items.some((e) => e.need_my_vote || e.need_my_edit_vote);
+          return `<details class="fold month" data-fold="m-${id}-${g.k}" ${foldOpen(`m-${id}-${g.k}`, gi === 0 || pending) ? 'open' : ''}>
+            <summary><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${monthTitle(g.k)}</div>
+              <div class="muted" style="font-size:12px;margin-top:2px">${g.items.length} ${plural(g.items.length, 'операция', 'операции', 'операций')}${sumOut ? ` · −${fmt(sumOut)}\u00A0€` : ''}${sumIn ? ` · +${fmt(sumIn)}\u00A0€` : ''}${pending ? ' · <span class="red">нужен ваш ответ</span>' : ''}</div></div>
+              <span class="chev" aria-hidden="true">${I.chev}</span></summary>
+            <div class="rows">${g.items.map(entryRow).join('')}</div></details>`;
+        }).join('');
+      })() : `<div class="empty">${filter === 'all' ? 'Операций пока нет.' : 'Нет операций этого типа.'}${me.canAdd && filter === 'all' ? '<br>Нажмите «＋» внизу, чтобы добавить расход.' : ''}</div>`}
+
 
       <div class="card list" style="margin-top:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;font-size:13px">
@@ -1054,35 +1086,29 @@ async function viewObject(id, filter = 'all') {
         ${c.settlement.map((s) => `<div style="font-size:15px;font-weight:500;margin-top:6px">${esc(s.fromName)} → ${esc(s.toName)} · <span class="num">${money(s.amount)}</span></div>`).join('')}
       </div>` : ''}
 
-      <div class="btn-row" style="margin-top:14px">
-        <a class="btn ghost sm" href="#/o/${id}/report" style="flex:1">Отчёт · PDF / Excel</a>
-        ${me.isCreator && !d.deal ? `<a class="btn ghost sm" href="#/o/${id}/deal" style="flex:1">Закрыть сделку</a>` : ''}
-      </div>
-      <div class="section-h"><h2>Операции</h2>${me.canAdd ? `<a class="pill" href="#/o/${id}/add">${I.plusSm}Добавить</a>` : ''}</div>
-      <div class="chips" style="margin-bottom:6px">${filters.map(([k, l]) => `<button data-f="${k}" class="${k === filter ? 'on' : ''}">${l}</button>`).join('')}</div>
-      ${entries.length ? (() => {
-        if (entries.length <= 6) return `<div class="rows">${entries.map(entryRow).join('')}</div>`;
-        const groups = [];
-        for (const e of entries) {
-          const k = (e.entry_date || '').slice(0, 7);
-          let g = groups[groups.length - 1];
-          if (!g || g.k !== k) { g = { k, items: [] }; groups.push(g); }
-          g.items.push(e);
-        }
-        return groups.map((g, gi) => {
-          const sumOut = g.items.filter((e) => e.kind === 'out').reduce((s, e) => s + e.amount, 0);
-          const sumIn = g.items.filter((e) => e.kind === 'in' || e.kind === 'rent').reduce((s, e) => s + e.amount, 0);
-          const pending = g.items.some((e) => e.need_my_vote || e.need_my_edit_vote);
-          return `<details class="fold month" data-fold="m-${id}-${g.k}" ${foldOpen(`m-${id}-${g.k}`, gi === 0 || pending) ? 'open' : ''}>
-            <summary><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${monthTitle(g.k)}</div>
-              <div class="muted" style="font-size:12px;margin-top:2px">${g.items.length} ${plural(g.items.length, 'операция', 'операции', 'операций')}${sumOut ? ` · −${fmt(sumOut)}\u00A0€` : ''}${sumIn ? ` · +${fmt(sumIn)}\u00A0€` : ''}${pending ? ' · <span class="red">нужен ваш ответ</span>' : ''}</div></div>
-              <span class="chev" aria-hidden="true">${I.chev}</span></summary>
-            <div class="rows">${g.items.map(entryRow).join('')}</div></details>`;
-        }).join('');
-      })() : `<div class="empty">${filter === 'all' ? 'Операций пока нет.' : 'Нет операций этого типа.'}${me.canAdd && filter === 'all' ? '<br>Добавьте взнос или расход.' : ''}</div>`}
     </div>
     ${tabbar('', me.canAdd ? id : null)}`;
   on('[data-f]', 'click', (e) => viewObject(id, e.currentTarget.dataset.f));
+  app.querySelector('#objmenu').onclick = () => {
+    const ct = o.contract;
+    const items = [
+      me.isCreator ? ['edit', `#/o/${id}/edit`, 'Редактировать объект', o.photo ? 'Название, цены, фото' : 'Название, цены, добавить фото'] : null,
+      ['contract', `#/o/${id}/contract`, 'Договор дольщиков', ct && ct.fixed ? (ct.all_signed ? 'Подписан всеми' : `Подписали ${ct.signed} из ${ct.total}`) : 'Сформировать и подписать'],
+      ['members', `#/o/${id}/members`, 'Участники и доли', `${d.members.length} ${plural(d.members.length, 'участник', 'участника', 'участников')}`],
+      me.role === 'investor' && !(d.advances || []).some((x) => x.status === 'active') && !d.deal ? ['advance', `#/o/${id}/advance`, 'Аванс от покупателя', 'Записать задаток и договор аванса'] : null,
+      ['report', `#/o/${id}/report`, 'Отчёт · PDF / Excel', 'Для партнёров и бухгалтера'],
+      me.isCreator && !d.deal ? ['deal', `#/o/${id}/deal`, 'Закрыть сделку', 'Цена продажи и выплаты участникам'] : null,
+      me.adminView ? null : ['delete', `#/o/${id}/delete`, 'Удаление и выгрузка', 'С согласия всех участников']
+    ].filter(Boolean);
+    const icons = { edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>', contract: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg>', members: I.user, advance: I.receipt.replace('width="12" height="12"', ''), report: I.share, deal: I.check.replace('width="16" height="16"', ''), delete: I.more };
+    const sheet = document.createElement('div');
+    sheet.className = 'viewer sheet-bg';
+    sheet.innerHTML = `<div class="sheet" role="dialog" aria-label="Действия с объектом"><div class="sheet-grip"></div>
+      ${items.map(([k, href, t, sub]) => `<a class="act" href="${href}"><span class="act-i ${k === 'delete' ? 'muted-i' : ''}">${icons[k]}</span><span class="act-t"><b>${t}</b><small>${sub}</small></span></a>`).join('')}</div>`;
+    document.body.appendChild(sheet);
+    requestAnimationFrame(() => sheet.classList.add('open'));
+    sheet.addEventListener('click', (e) => { if (e.target === sheet || e.target.closest('a')) sheet.remove(); });
+  };
   on('[data-adv]', 'click', async (e) => {
     const st = e.currentTarget.dataset.st;
     const q = { applied: 'Отметить, что сделка состоялась и аванс зачтён в цену продажи?', kept: 'Покупатель отказался и аванс остаётся у вас? Сумма пойдёт в прибыль и разделится по долям.', returned: 'Отметить, что аванс вернули покупателю?' }[st];
@@ -1167,13 +1193,9 @@ async function viewAdd(id, presetKind) {
         <div class="topbar">${backBtn(`#/o/${id}`, 'Закрыть')}<div class="title"><b>Новая операция</b><small>${esc(d.object.name)}</small></div><div class="spacer44"></div></div>
         ${kinds.length > 1 ? `<div class="seg" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr));margin-top:20px">${kinds.map(([k, l]) => `<button data-k="${k}" class="${k === s.kind ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
         ${amountBlock(s, isRent ? 'Получено за аренду' : 'Сумма расхода')}
-        <span class="label">${isRent ? 'Кто получил' : 'Кто оплатил'}</span>
-        <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px">${avatar(state.me.id, state.me.name)}
-          <div style="flex:1"><div style="font-weight:500">${esc(state.me.name)} <span class="muted" style="font-weight:400">· вы</span></div><div class="muted" style="font-size:12px;margin-top:2px">Только свои операции, за партнёра нельзя</div></div>
-          <span class="muted" style="width:16px;height:16px;display:inline-flex" role="img" aria-label="Нельзя изменить">${I.lock}</span></div>
-        <div class="muted" style="font-size:12px;margin-top:8px">${isRent ? 'Аренда идёт в прибыль и делится по долям. Деньги у вас на руках — это учтётся во взаиморасчёте.' : 'Оплачено из ваших денег — сумма засчитается как ваше вложение.'}</div>
+        <div class="payer">${avatar(state.me.id, state.me.name, 'sm')}<span>${isRent ? 'Получили вы — аренда идёт в прибыль и делится по долям' : 'Оплатили вы — сумма засчитается как ваше вложение'}</span><span class="muted" style="width:14px;height:14px;display:inline-flex;flex:none" role="img" aria-label="Только свои операции">${I.lock}</span></div>
         ${isOut ? `<span class="label">Категория${foreman ? ' · прораб вносит только ремонт' : ''}</span>
-          <div class="chips">${(foreman ? ['Ремонт'] : d.categories).map((c) => `<button data-c="${esc(c)}" class="${c === s.category ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>` : ''}
+          <div class="chips wrap">${(foreman ? ['Ремонт'] : d.categories).map((c) => `<button data-c="${esc(c)}" class="${c === s.category ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>` : ''}
         <label class="label" for="note">Комментарий</label>
         <input id="note" class="field" placeholder="${isRent ? 'Например: аренда за ноябрь' : 'Например: плитка, санузел'}" value="${esc(noteVal)}">
         <label class="label" for="date">Дата</label>
@@ -1185,7 +1207,7 @@ async function viewAdd(id, presetKind) {
             <label class="add-tile">${I.gallery}<span>Галерея</span><input type="file" accept="image/*" multiple data-photo aria-label="Загрузить фото из галереи"></label>
           </div>
           <div class="muted" style="font-size:12px;margin-top:8px">Сумму и дату с первого фото чека приложение попробует прочитать само — проверьте их.</div>` : ''}
-        <button class="btn" id="save" style="margin-top:28px">Сохранить</button>
+        <div class="sticky-cta"><button class="btn" id="save">Сохранить</button></div>
       </div>`;
     bindAmount(s, draw);
     on('[data-k]', 'click', (e) => { s.kind = e.currentTarget.dataset.k; draw(); });
@@ -1264,7 +1286,7 @@ async function viewEntryEdit(eid) {
         <label class="label" for="note">Комментарий</label><input id="note" class="field" value="${esc(noteVal)}">
         <label class="label" for="date">Дата</label><input id="date" class="field" type="date" value="${esc(dateVal)}">
         <div class="card dashed" style="margin-top:16px;font-size:13px;line-height:1.5;color:#B5B5BA">Исправление применится, когда согласятся все участники сделки. До этого в расчётах остаётся прежняя версия.</div>
-        <button class="btn" id="save" style="margin-top:20px">Отправить на согласование</button>
+        <div class="sticky-cta"><button class="btn" id="save">Отправить на согласование</button></div>
       </div>`;
     bindAmount(s, draw);
     on('[data-c]', 'click', (ev) => { s.category = ev.currentTarget.dataset.c; draw(); });
@@ -1446,8 +1468,8 @@ async function viewDeal(id) {
       <div class="card list">${earners.map((r) => `<div class="row">${avatar(r.user_id, r.name)}
         <div class="grow"><div class="t" style="font-size:14px">${esc(r.name)}${r.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
           <div class="s num">вложил ${fmt(r.invested)} € → получает ${fmt(r.total)} €</div>
-          ${r.cash ? `<div class="s num" style="font-size:11px">уже на руках ${fmt(r.cash)} €</div>` : ''}</div>
-        <div class="r"><div class="display num ${r.profit >= 0 ? 'okc' : 'red'}" style="font-weight:600;font-size:17px">${signed(r.profit)} €</div>${r.invested > 0 ? `<div class="muted num" style="font-size:11px">${pct((r.profit / r.invested) * 100)} на вложения</div>` : ''}</div></div>`).join('')}</div>
+          ${r.cash ? `<div class="s num" style="font-size:12px">уже на руках ${fmt(r.cash)} €</div>` : ''}</div>
+        <div class="r"><div class="display num ${r.profit >= 0 ? 'okc' : 'red'}" style="font-weight:600;font-size:17px">${signed(r.profit)} €</div>${r.invested > 0 ? `<div class="muted num" style="font-size:12px">${pct((r.profit / r.invested) * 100)} на вложения</div>` : ''}</div></div>`).join('')}</div>
       <div class="label" style="display:flex;justify-content:space-between"><span>Выплаты</span><span>${paidCount} из ${deal.transfers.length}</span></div>
       ${deal.transfers.length ? `<div class="card list">${deal.transfers.map((t) => `<div class="row">
         <div class="grow"><div class="t" style="font-size:14px">${esc(t.fromName)} → ${esc(t.toName)}</div><div class="s">${t.paid_at ? `выплачено · ${dateRu(String(t.paid_at).slice(0, 10))}` : 'ещё не выплачено'}</div></div>
@@ -1530,7 +1552,7 @@ async function viewForecast(id) {
       <div class="card" style="margin-top:20px">
         <div class="muted" style="font-size:12px;display:flex;justify-content:space-between"><span>Ориентировочная цена продажи</span>${o.area && o.sale_price ? `<span>${fmt(o.sale_price / o.area)} € / м²</span>` : ''}</div>
         ${me.isCreator ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-            <input id="sale" class="field" inputmode="decimal" style="font-family:Manrope;font-weight:600;font-size:22px" value="${o.sale_price ?? ''}" placeholder="Например: 105000">
+            <input id="sale" class="field" inputmode="decimal" style="font-family:Manrope,Inter,sans-serif;font-weight:600;font-size:22px" value="${o.sale_price ?? ''}" placeholder="Например: 105000">
             <button class="btn sm" id="saveSale">OK</button></div>`
           : `<div class="display num" style="font-weight:600;font-size:30px;margin-top:6px">${o.sale_price !== null ? money(o.sale_price) : '<span class="muted" style="font-size:16px">создатель ещё не указал</span>'}</div>`}
       </div>
@@ -1544,7 +1566,7 @@ async function viewForecast(id) {
         ${c.shareSum !== 100 ? '<div class="red" style="font-size:12px;margin-top:10px">Доли инвесторов не равны 100 % — создатель должен их поправить.</div>' : ''}
       </div>` : ''}
       <div class="section-h" style="margin-bottom:4px"><h2>Расходы</h2><div class="num" style="font-size:13px"><span class="muted">факт</span> ${fmt(c.factTotal)} <span class="muted">/ план</span> ${fmt(c.planTotal)} €</div></div>
-      <div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin-bottom:6px">
+      <div style="display:flex;gap:14px;font-size:12px;color:var(--muted);margin-bottom:6px">
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--gold);display:inline-block"></i>Факт</span>
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--line2);display:inline-block"></i>План</span>
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--red);display:inline-block"></i>Перерасход</span></div>
@@ -1786,16 +1808,18 @@ async function viewMarket(tab) {
         <div style="flex:1"><div style="font-size:12px" class="${mp.status === 'approved' ? '' : 'muted'}">${mp.status === 'approved' ? 'Моя анкета инвестора опубликована' : mp.status === 'pending' ? 'Моя анкета на проверке' : 'Анкета не опубликована'}</div>
         <div style="font-size:16px;font-weight:600;margin-top:4px" class="num">${rangeText(mp.amount_from, mp.amount_to)}</div>
         ${mp.status === 'rejected' && mp.reject_reason ? `<div class="red" style="font-size:12px;margin-top:4px">${esc(mp.reject_reason)}</div>` : ''}</div>${I.chev}</a>`
-    : `<div class="card" style="margin-top:14px;background:linear-gradient(135deg,#221E16,#17171A)">
-        <div style="font-size:17px;font-weight:600">Есть деньги — хотите заработать?</div>
+    : foldOpen('cta-investor', true) ? `<div class="card" style="margin-top:14px;background:linear-gradient(135deg,#221E16,#17171A);position:relative">
+        <button type="button" class="link-btn" id="cta-x" aria-label="Скрыть" style="position:absolute;top:8px;right:10px;color:var(--muted);font-size:20px;padding:4px 8px">×</button>
+        <div style="font-size:17px;font-weight:600;padding-right:24px">Есть деньги — хотите заработать?</div>
         <div style="font-size:13px;line-height:1.5;color:#B5B5BA;margin-top:6px">Заполните анкету: сколько готовы вложить. Авторы сделок увидят её и предложат вам объекты, а вы откликайтесь на сделки ниже.</div>
-        <a class="btn sm" href="#/market/profile" style="margin-top:14px;display:flex">Хочу стать инвестором</a></div>`;
+        <a class="btn sm" href="#/market/profile" style="margin-top:14px;display:flex">Хочу стать инвестором</a></div>`
+    : '';
   const deals = d.offers.filter((o) => o.status === 'approved' && !o.mine);
   const mine = d.offers.filter((o) => o.mine && o.status !== 'closed');
   app.innerHTML = `
     <div class="screen">
       <div class="topbar"><div class="logo">Доска объявлений</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
-      <div class="lead" style="margin-top:6px">Объявления о сделках и анкеты инвесторов. Всё публикуется после проверки, контакты открываются, когда обе стороны согласны.</div>
+      <div class="muted" style="font-size:13px;margin-top:6px">Всё проходит проверку · контакты — после согласия обеих сторон</div>
       ${d.inbox ? `<a class="card gold-b" href="#/market/inbox" style="display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--text);border-color:#5A4E33"><span style="flex:1;font-size:14px">Ждут вашего ответа: <b class="gold">${d.inbox}</b></span>${I.chev}</a>` : `<a href="#/market/inbox" class="muted" style="display:block;font-size:13px;margin-top:12px">Мои отклики и предложения →</a>`}
       <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:16px"><button data-mt="deals" class="${tab === 'deals' ? 'on' : ''}">Сделки · ${deals.length}</button><button data-mt="investors" class="${tab === 'investors' ? 'on' : ''}">Инвесторы · ${d.investors.length}</button></div>
       ${tab === 'deals' ? `
@@ -1811,6 +1835,8 @@ async function viewMarket(tab) {
     </div>
     ${tabbar('market')}`;
   on('[data-mt]', 'click', (e) => go(e.currentTarget.dataset.mt === 'investors' ? '#/market/investors' : '#/market'));
+  const cx = app.querySelector('#cta-x');
+  if (cx) cx.onclick = () => { try { localStorage.setItem('fold:cta-investor', '0'); } catch { /* нет доступа */ } viewMarket(tab); };
   on('[data-propose]', 'click', (e) => proposeSheet(Number(e.currentTarget.dataset.propose), myApproved));
 }
 
@@ -2067,7 +2093,7 @@ async function viewMarketAdmin() {
 async function viewAdminUsers() {
   if (!state.me.is_admin) return go('#/profile');
   const st = await api('GET', '/api/admin/stats');
-  const tile = (k, v, sub) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="muted" style="font-size:11px;margin-top:2px">${sub}</div>` : ''}</div>`;
+  const tile = (k, v, sub) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="muted" style="font-size:12px;margin-top:2px">${sub}</div>` : ''}</div>`;
   app.innerHTML = `
     <div class="screen no-tab">
       <div class="topbar">${backBtn('#/profile')}<div class="title"><b>Пользователи</b><small>статистика Доли</small></div><div class="spacer44"></div></div>
@@ -2079,7 +2105,7 @@ async function viewAdminUsers() {
       <div class="card list">${st.users.map((u) => `<a class="row" href="#/admin/u/${u.id}" style="color:var(--text)">${avatar(u.id, u.name)}
         <div class="grow"><div class="t" style="font-size:14px">${esc(u.name)}${u.is_admin ? ' <span class="badge gold">админ</span>' : ''}</div>
           <div class="s">${u.tg_username ? `<span data-nt>@${esc(u.tg_username)}</span>` : u.tg ? 'Telegram' : 'email'} · ${dateRu(u.joined)}${u.seen ? ` · ${I18N.tr('был')} ${dateRu(u.seen)}` : ''}</div></div>
-        <div class="r"><div class="num" style="font-size:14px">${u.objects}</div><div class="muted" style="font-size:11px">${plural(u.objects, 'объект', 'объекта', 'объектов')}</div></div></a>`).join('')}</div>
+        <div class="r"><div class="num" style="font-size:14px">${u.objects}</div><div class="muted" style="font-size:12px">${plural(u.objects, 'объект', 'объекта', 'объектов')}</div></div></a>`).join('')}</div>
     </div>`;
 }
 
@@ -2087,8 +2113,8 @@ async function viewAdminUsers() {
 const adminObjRow = (o) => `<a class="row" href="#/o/${o.id}" style="color:var(--text)">
   <div class="grow"><div class="t" style="font-size:14px"><span data-nt>${esc(o.name)}</span> <span class="badge ${esc(o.status)}">${esc(o.status)}</span>${o.role ? ` <span class="muted" style="font-size:12px">· ${esc(ROLE_RU[o.role] || o.role)}</span>` : ''}</div>
     <div class="s">${esc(o.creator)} · ${dateRu(o.created)} · ${o.people} ${plural(o.people, 'участник', 'участника', 'участников')} · ${o.ops} ${plural(o.ops, 'операция', 'операции', 'операций')} · ${o.receipts} ${plural(o.receipts, 'чек', 'чека', 'чеков')}</div>
-    ${o.checked ? `<div class="s okc" style="font-size:11px">проверено ${dateRu(o.checked)}</div>` : ''}</div>
-  <div class="r"><div class="num" style="font-size:14px">${money(o.spent)}</div><div class="muted" style="font-size:11px">расходы</div></div></a>`;
+    ${o.checked ? `<div class="s okc" style="font-size:12px">проверено ${dateRu(o.checked)}</div>` : ''}</div>
+  <div class="r"><div class="num" style="font-size:14px">${money(o.spent)}</div><div class="muted" style="font-size:12px">расходы</div></div></a>`;
 const ROLE_RU = { investor: 'инвестор', foreman: 'прораб', viewer: 'просмотр' };
 
 async function viewAdminObjects() {
@@ -2116,15 +2142,79 @@ async function viewAdminUser(uid) {
         ${u.phone ? `<div class="kv"><span class="muted">Телефон</span><span>${esc(u.phone)}</span></div>` : ''}
         ${d.investor ? `<div class="kv"><span class="muted">Анкета инвестора</span><span class="num">${rangeText(d.investor.amount_from, d.investor.amount_to)} · ${OFFER_STATUS[d.investor.status] || d.investor.status}</span></div>` : ''}
       </div>
-      ${u.tg_username ? `<button class="btn ghost sm" data-ext="https://t.me/${esc(u.tg_username)}" style="width:100%;margin-top:10px">Написать в Telegram</button>` : ''}
+      <div class="btn-row" style="margin-top:10px">${u.tg_username ? `<button class="btn ghost sm" data-ext="https://t.me/${esc(u.tg_username)}" style="flex:1">Написать в Telegram</button>` : ''}<button class="btn ghost sm" id="rlink" style="flex:1">Ссылка для сброса пароля</button></div>
       <div class="label" style="display:flex;justify-content:space-between"><span>Объекты</span><span>${d.objects.length}</span></div>
       ${d.objects.length ? `<div class="card list">${d.objects.map(adminObjRow).join('')}</div>` : '<div class="card empty">Нет объектов.</div>'}
       ${d.offers.length ? `<div class="label">Предложения на доске</div><div class="card list">${d.offers.map((o) => `<a class="row" href="#/market/o/${o.id}" style="color:var(--text)"><div class="grow"><div class="t" data-nt style="font-size:14px">${esc(o.title)}</div><div class="s">${OFFER_STATUS[o.status] || o.status}</div></div><div class="r num">${money(o.need_amount)}</div></a>`).join('')}</div>` : ''}
     </div>`;
   bindExt();
+  app.querySelector('#rlink').onclick = async () => {
+    if (!ask('Создать ссылку для сброса пароля? Отправьте её человеку сами — она действует 24 часа.')) return;
+    try {
+      const r = await api('POST', `/api/admin/users/${uid}/reset-link`);
+      try { await navigator.clipboard.writeText(r.url); toast('Ссылка скопирована', true); } catch { prompt(I18N.tr('Ссылка для сброса пароля'), r.url); }
+    } catch (ex) { toast(ex.message); }
+  };
+}
+
+
+function viewForgot() {
+  app.innerHTML = `
+    <div class="auth-wrap">
+      <a class="icon-btn back-btn" href="#/login" aria-label="Назад" style="margin-bottom:24px">${I.back}</a>
+      <h1 class="h" style="margin:0">Восстановить пароль</h1>
+      <div class="lead">Укажите email, с которым регистрировались. Если аккаунт привязан к Telegram, ссылка для нового пароля придёт в бот.</div>
+      <form id="f" style="margin-top:24px" novalidate>
+        <label class="label" for="email">Email</label>
+        <input class="field" id="email" type="email" autocomplete="email" inputmode="email" required>
+        <button class="btn" style="margin-top:16px">Получить ссылку</button>
+      </form>
+      <div id="done"></div>
+    </div>`;
+  app.querySelector('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('POST', '/api/password/forgot', { email: app.querySelector('#email').value });
+      app.querySelector('#f').remove();
+      app.querySelector('#done').innerHTML = `<div class="card green" style="margin-top:20px;font-size:14px;line-height:1.5">Если этот email привязан к Telegram, ссылка уже в боте${r.bot ? ` <span data-nt>@${esc(r.bot)}</span>` : ''}. Она действует 24 часа.</div>
+        <div class="card" style="margin-top:10px;font-size:14px;line-height:1.5;color:#B5B5BA">Telegram не привязан? Напишите администратору${r.admin ? ` <span data-nt>@${esc(r.admin)}</span>` : ''} — он пришлёт ссылку для сброса.</div>
+        ${r.admin ? `<button class="btn ghost" data-ext="https://t.me/${esc(r.admin)}" style="margin-top:12px">Написать администратору</button>` : ''}
+        <a href="#/login" class="btn ghost" style="margin-top:10px">Ко входу</a>`;
+      bindExt();
+    } catch (ex) { toast(ex.message); }
+  };
+}
+
+async function viewReset(t) {
+  let info;
+  try { info = await api('GET', `/api/password/reset/${t}`); } catch (e) {
+    app.innerHTML = `<div class="auth-wrap"><h1 class="h">Ссылка устарела</h1><div class="lead">${esc(I18N.tr(e.message))}. Запросите новую.</div><a class="btn" href="#/forgot" style="margin-top:20px">Восстановить пароль</a></div>`;
+    return;
+  }
+  app.innerHTML = `
+    <div class="auth-wrap">
+      <h1 class="h" style="margin:0">Новый пароль</h1>
+      <div class="lead"><span data-nt>${esc(info.name)}</span> · <span data-nt>${esc(info.email)}</span></div>
+      <form id="f" style="margin-top:24px" novalidate>
+        <label class="label" for="pw">Новый пароль</label>
+        <input class="field" id="pw" type="password" autocomplete="new-password" minlength="6" required>
+        <div class="err" id="err" role="alert"></div>
+        <button class="btn" style="margin-top:12px">Сохранить и войти</button>
+      </form>
+    </div>`;
+  app.querySelector('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const d = await api('POST', `/api/password/reset/${t}`, { password: app.querySelector('#pw').value });
+      state.me = d.user; sessionToken.set(d.token);
+      toast('Пароль изменён', true); location.hash = '#/'; location.reload();
+    } catch (ex) { app.querySelector('#err').textContent = I18N.tr(ex.message); }
+  };
 }
 
 const routes = [
+  [/^#\/forgot$/, () => viewForgot(), true],
+  [/^#\/reset\/([\w-]+)$/, (m) => viewReset(m[1]), true],
   [/^#\/admin\/objects$/, () => viewAdminObjects()],
   [/^#\/admin\/u\/(\d+)$/, (m) => viewAdminUser(m[1])],
   [/^#\/admin\/users$/, () => viewAdminUsers()],

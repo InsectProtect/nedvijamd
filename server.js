@@ -93,11 +93,13 @@ function checkPassword(password, stored) {
 }
 
 const token = (bytes = 24) => crypto.randomBytes(bytes).toString('base64url');
-const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+// Числа приходят и как «68 000» или «12,5» — пробелы убираем, запятую считаем точкой
+const numClean = (v) => (typeof v === 'string' ? v.replace(/[\s\u00A0\u202F]/g, '').replace(',', '.') : v);
+const num = (v) => { v = numClean(v); return v === null || v === undefined || v === '' ? null : Number(v); };
 const str = (v, max = 200) => (v === null || v === undefined ? '' : String(v).trim().slice(0, max));
 
 function positiveAmount(v) {
-  const x = Number(v);
+  const x = Number(numClean(v));
   if (!Number.isFinite(x) || x <= 0 || x > 1e10) fail(400, 'Введите сумму больше нуля');
   return Math.round(x * 100) / 100;
 }
@@ -399,6 +401,50 @@ route('POST', '/api/login', async ({ req, body }) => {
   const sess = await startSession(req, null, user.id);
   return { status: 200, data: { user: { id: user.id, email: user.email, name: user.name, lang: user.lang, needs_name: needsName(user.name) }, token: sess.token }, headers: { 'Set-Cookie': sess.cookie } };
 }, { auth: false });
+
+// ---------- восстановление пароля ----------
+async function makeResetLink(userId) {
+  const t = token(24);
+  await db.query(`INSERT INTO password_resets (token, user_id, expires_at) VALUES ($1, $2, now() + interval '24 hours')`, [t, userId]);
+  return `${PUBLIC_URL}/#/reset/${t}`;
+}
+route('POST', '/api/password/forgot', async ({ body }) => {
+  const email = str(body.email, 200).toLowerCase();
+  const u = email ? await db.one('SELECT id, telegram_id, lang FROM users WHERE email = $1', [email]) : null;
+  if (u && u.telegram_id && tg.enabled()) {
+    const recent = await db.one(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1 AND expires_at > now() + interval '23 hours 50 minutes'`, [u.id]);
+    if (!recent.n) {
+      const url = await makeResetLink(u.id);
+      const ro = u.lang === 'ro';
+      await tg.send(String(u.telegram_id), ro ? '🔑 Resetarea parolei Dolya. Linkul funcționează 24 de ore. Dacă nu ați cerut asta, ignorați mesajul.' : '🔑 Сброс пароля в Доле. Ссылка действует 24 часа. Если вы не запрашивали сброс, просто проигнорируйте сообщение.', url, ro ? 'Setează parola nouă' : 'Задать новый пароль').catch(() => {});
+    }
+  }
+  // Ответ одинаковый, чтобы нельзя было проверить, есть ли такой email
+  return { ok: true, admin: ADMIN_TG[0] || null, bot: tg.username() || null };
+}, { auth: false });
+route('GET', '/api/password/reset/:token', async ({ params }) => {
+  const r = await db.one('SELECT u.name, u.email FROM password_resets p JOIN users u ON u.id = p.user_id WHERE p.token = $1 AND p.expires_at > now()', [params.token]);
+  if (!r) fail(404, 'Ссылка устарела или уже использована');
+  return { name: r.name, email: r.email };
+}, { auth: false });
+route('POST', '/api/password/reset/:token', async ({ req, params, body }) => {
+  const r = await db.one('SELECT user_id FROM password_resets WHERE token = $1 AND expires_at > now()', [params.token]);
+  if (!r) fail(404, 'Ссылка устарела или уже использована');
+  const password = String(body.password || '');
+  if (password.length < 6) fail(400, 'Пароль — минимум 6 символов');
+  await db.query('UPDATE users SET pass_hash = $1 WHERE id = $2', [hashPassword(password), r.user_id]);
+  await db.query('DELETE FROM password_resets WHERE user_id = $1', [r.user_id]);
+  await db.query('DELETE FROM sessions WHERE user_id = $1', [r.user_id]);
+  const user = await db.one('SELECT id, email, name, lang FROM users WHERE id = $1', [r.user_id]);
+  const sess = await startSession(req, null, user.id);
+  return { status: 200, data: { user: { ...user, needs_name: needsName(user.name) }, token: sess.token }, headers: { 'Set-Cookie': sess.cookie } };
+}, { auth: false });
+route('POST', '/api/admin/users/:id/reset-link', async ({ user, params }) => {
+  if (!user.is_admin) fail(403, 'Только для администратора приложения');
+  const u = await db.one('SELECT id FROM users WHERE id = $1', [params.id]);
+  if (!u) fail(404, 'Пользователь не найден');
+  return { url: await makeResetLink(u.id) };
+});
 
 route('POST', '/api/logout', async ({ req }) => {
   const sid = parseCookies(req).sid;
