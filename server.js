@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const db = require('./db');
 const { computeObject, CATEGORIES } = require('./calc');
 const tg = require('./tg');
-const { buildContract } = require('./contract');
+const { buildContract, makeSnapshot, termsHash } = require('./contract');
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
@@ -174,7 +174,7 @@ async function membership(objectId, userId) {
 async function loadObject(objectId) {
   const object = await db.one(
     `SELECT id, name, area, status, purchase_price, sale_price, repair_budget, installment, installment_monthly, creator_id, delete_requested_at, created_at,
-            (photo IS NOT NULL) AS has_photo, photo_v FROM objects WHERE id = $1`,
+            (photo IS NOT NULL) AS has_photo, photo_v, contract_fields FROM objects WHERE id = $1`,
     [objectId]
   );
   if (!object) fail(404, 'Объект не найден');
@@ -350,6 +350,12 @@ route('PATCH', '/api/me', async ({ user, body }) => {
     await db.query('UPDATE users SET name = $1 WHERE id = $2', [name, user.id]);
   }
   if (body.lang === 'ru' || body.lang === 'ro') await db.query('UPDATE users SET lang = $1 WHERE id = $2', [body.lang, user.id]);
+  if (body.idnp !== undefined) {
+    const idnp = String(body.idnp || '').replace(/\s/g, '');
+    if (idnp && !/^\d{13}$/.test(idnp)) fail(400, 'IDNP — 13 цифр');
+    await db.query('UPDATE users SET idnp = $1 WHERE id = $2', [idnp || null, user.id]);
+  }
+  if (body.address !== undefined) await db.query('UPDATE users SET address = $1 WHERE id = $2', [str(body.address, 300) || null, user.id]);
   const u = await db.one('SELECT id, email, name, tg_username, lang, telegram_id FROM users WHERE id = $1', [user.id]);
   return { user: { id: u.id, email: u.email, name: u.name, tg_username: u.tg_username, lang: u.lang, telegram: !!u.telegram_id, needs_name: needsName(u.name) } };
 });
@@ -463,6 +469,7 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       installment_monthly: num(object.installment_monthly),
       repair_budget: num(object.repair_budget),
       repair: repairInfo(object, calc),
+      contract: await contractStatus(object.id),
       creator_id: Number(object.creator_id),
       delete_requested: !!object.delete_requested_at
     },
@@ -496,15 +503,141 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
   };
 });
 
-async function contractHtml(objectId, printable) {
+// ---------- договор: черновик, редакции, подписи ----------
+
+async function liveSnapshot(objectId) {
   const { object, members, entries } = await loadObject(objectId);
   const calc = computeObject(object, members, entries);
-  return buildContract({ object, members, calc, installment: installmentInfo(object, calc), repair: repairInfo(object, calc), printable });
+  return makeSnapshot({ object, members, calc, installment: installmentInfo(object, calc), repair: repairInfo(object, calc) });
+}
+
+async function latestVersion(objectId) {
+  return db.one('SELECT id, data, terms_hash, created_at FROM contract_versions WHERE object_id = $1 ORDER BY id DESC LIMIT 1', [objectId]);
+}
+
+async function signaturesOf(versionId) {
+  const rows = await db.query(
+    `SELECT user_id, encode(signature, 'base64') AS image, idnp, address, signed_at FROM contract_signatures WHERE version_id = $1`,
+    [versionId]
+  );
+  return Object.fromEntries(rows.map((r) => [Number(r.user_id), { image: r.image, idnp: r.idnp, address: r.address, signed_at: r.signed_at }]));
+}
+
+async function partyDetails(userIds) {
+  if (!userIds.length) return {};
+  const rows = await db.query(`SELECT id, idnp, address FROM users WHERE id = ANY($1::int[])`, [`{${userIds.join(',')}}`]);
+  return Object.fromEntries(rows.map((r) => [Number(r.id), { idnp: r.idnp, address: r.address }]));
+}
+
+async function contractStatus(objectId) {
+  const v = await latestVersion(objectId);
+  if (!v) return { fixed: false, signed: 0, total: 0, all_signed: false, signers: [] };
+  const data = typeof v.data === 'string' ? JSON.parse(v.data) : v.data;
+  const sigs = await db.query('SELECT user_id FROM contract_signatures WHERE version_id = $1', [v.id]);
+  const signers = sigs.map((s) => Number(s.user_id));
+  const total = data.parties.length;
+  return { fixed: true, version_id: v.id, signed: signers.length, total, all_signed: total > 0 && signers.length >= total, signers };
+}
+
+async function contractHtml(objectId, printable) {
+  const v = await latestVersion(objectId);
+  if (v) {
+    const data = typeof v.data === 'string' ? JSON.parse(v.data) : v.data;
+    const signatures = await signaturesOf(v.id);
+    const details = await partyDetails(data.parties.map((p) => p.user_id));
+    return buildContract(data, { signatures, details, printable });
+  }
+  const snap = await liveSnapshot(objectId);
+  return buildContract(snap, { details: await partyDetails(snap.parties.map((p) => p.user_id)), printable, draft: true });
 }
 
 route('GET', '/api/objects/:id/contract', async ({ user, params }) => {
+  const me = await membership(params.id, user.id);
+  const live = await liveSnapshot(params.id);
+  const v = await latestVersion(params.id);
+  const data = v ? (typeof v.data === 'string' ? JSON.parse(v.data) : v.data) : null;
+  const sigs = v ? await signaturesOf(v.id) : {};
+  const parties = (data || live).parties;
+  const details = await partyDetails(parties.map((p) => p.user_id));
+  const mine = await db.one('SELECT idnp, address FROM users WHERE id = $1', [user.id]);
+  return {
+    html: await contractHtml(params.id, false),
+    fixed: !!v,
+    version: v ? { id: v.id, created_at: v.created_at, stale: v.terms_hash !== termsHash(live) } : null,
+    parties: parties.map((p) => ({
+      user_id: p.user_id, name: p.name, role: p.role,
+      signed_at: sigs[p.user_id] ? sigs[p.user_id].signed_at : null,
+      has_details: !!((sigs[p.user_id] || details[p.user_id] || {}).idnp && (sigs[p.user_id] || details[p.user_id] || {}).address)
+    })),
+    fields: live.fields,
+    installment: !!live.installment,
+    me: { idnp: mine.idnp || '', address: mine.address || '', is_party: parties.some((p) => p.user_id === Number(user.id)), isCreator: me.isCreator },
+    live_parties: live.parties.map((p) => ({ user_id: p.user_id, name: p.name }))
+  };
+});
+
+// Данные договора, которые заполняет создатель
+route('PUT', '/api/objects/:id/contract-fields', async ({ user, params, body }) => {
+  const me = await membership(params.id, user.id);
+  if (!me.isCreator) fail(403, 'Данные договора заполняет создатель объекта');
+  const f = {};
+  for (const k of ['number', 'city', 'property_address', 'cadastral', 'owner_name', 'installment_no']) {
+    const v = str(body[k], 300);
+    if (v) f[k] = v;
+  }
+  for (const k of ['contract_date', 'installment_date']) if (/^\d{4}-\d{2}-\d{2}$/.test(body[k] || '')) f[k] = body[k];
+  for (const k of ['overrun_pct', 'payout_days']) { const n = Number(body[k]); if (Number.isFinite(n) && n > 0 && n < 10000) f[k] = Math.round(n); }
+  if (body.owner_user_id) f.owner_user_id = Number(body.owner_user_id);
+  await db.query('UPDATE objects SET contract_fields = $1::jsonb WHERE id = $2', [JSON.stringify(f), params.id]);
+  return { ok: true };
+});
+
+// Зафиксировать редакцию для подписи (старые подписи остаются у прежней редакции)
+route('POST', '/api/objects/:id/contract/fix', async ({ user, params }) => {
+  const me = await membership(params.id, user.id);
+  if (!me.isCreator) fail(403, 'Отправить договор на подпись может только создатель объекта');
+  const snap = await liveSnapshot(params.id);
+  if (!snap.parties.length) fail(400, 'В договоре нет сторон');
+  const sum = snap.parties.filter((p) => p.role === 'investor').reduce((s, p) => s + p.share_pct, 0);
+  if (Math.abs(sum - 100) > 0.01) fail(400, 'Сначала доведите доли инвесторов до 100 %');
+  const v = await db.one(
+    'INSERT INTO contract_versions (object_id, data, terms_hash, created_by) VALUES ($1, $2::jsonb, $3, $4) RETURNING id',
+    [params.id, JSON.stringify(snap), termsHash(snap), user.id]
+  );
+  const oname = tg.escHtml(snap.object.name);
+  notifyObject(params.id, user.id, (lang) => lang === 'ro'
+    ? `✍️ <b>${oname}</b>\n${tg.escHtml(user.name)} a trimis Acordul de investiție comună spre semnare. Verificați-l și semnați în aplicație.`
+    : `✍️ <b>${oname}</b>\n${tg.escHtml(user.name)} отправил договор дольщиков на подпись. Проверьте его и подпишите в приложении.`,
+    `/o/${params.id}/contract`, snap.parties.map((p) => p.user_id));
+  return { version_id: v.id };
+});
+
+// Подписать текущую редакцию
+route('POST', '/api/objects/:id/contract/sign', async ({ user, params, body }) => {
   await membership(params.id, user.id);
-  return { html: await contractHtml(params.id, false) };
+  const v = await latestVersion(params.id);
+  if (!v) fail(400, 'Договор ещё не отправлен на подпись');
+  if (body.version_id && Number(body.version_id) !== Number(v.id)) fail(409, 'Договор изменился — откройте его заново');
+  const data = typeof v.data === 'string' ? JSON.parse(v.data) : v.data;
+  if (!data.parties.some((p) => p.user_id === Number(user.id))) fail(403, 'Вы не сторона этого договора');
+  if (body.agree !== true) fail(400, 'Подтвердите, что прочитали договор');
+  const u = await db.one('SELECT idnp, address FROM users WHERE id = $1', [user.id]);
+  if (!u.idnp || !u.address) fail(400, 'Заполните IDNP и адрес');
+  const img = String(body.signature || '').replace(/^data:image\/png;base64,/, '');
+  const buf = Buffer.from(img, 'base64');
+  if (buf.length < 200 || buf.length > 400 * 1024 || buf.readUInt32BE(0) !== 0x89504e47) fail(400, 'Подпись не распознана — распишитесь ещё раз');
+  await db.query(
+    `INSERT INTO contract_signatures (version_id, user_id, signature, idnp, address) VALUES ($1, $2, decode($3, 'base64'), $4, $5)
+     ON CONFLICT (version_id, user_id) DO NOTHING`,
+    [v.id, user.id, buf.toString('base64'), u.idnp, u.address]
+  );
+  const st = await contractStatus(params.id);
+  const oname = tg.escHtml(data.object.name);
+  notifyObject(params.id, user.id, (lang) => st.all_signed
+    ? (lang === 'ro' ? `✅ <b>${oname}</b>\nAcordul a fost semnat de toate Părțile.` : `✅ <b>${oname}</b>\nДоговор подписан всеми сторонами.`)
+    : (lang === 'ro' ? `✍️ <b>${oname}</b>\n${tg.escHtml(user.name)} a semnat Acordul (${st.signed} din ${st.total}).` : `✍️ <b>${oname}</b>\n${tg.escHtml(user.name)} подписал договор (${st.signed} из ${st.total}).`),
+    `/o/${params.id}/contract`, data.parties.map((p) => p.user_id));
+  return st;
 });
 
 // Ссылка, чтобы открыть договор в обычном браузере (из Telegram) и сохранить в PDF
@@ -656,7 +789,7 @@ route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
     if (kind === 'in') fail(403, 'Прораб не вносит взносы, только расходы на ремонт');
     category = 'Ремонт';
   }
-  const source = body.source === 'pool' && kind === 'out' ? 'pool' : 'own';
+  const source = 'own'; // общего котла нет: каждый платит из своих денег
   const amount = positiveAmount(body.amount);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(body.entry_date || '') ? body.entry_date : null;
   // Автор операции — всегда тот, кто вошёл. За другого внести нельзя.

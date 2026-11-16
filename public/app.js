@@ -335,12 +335,72 @@ function viewName() {
 
 async function viewContract(id) {
   const d = await api('GET', `/api/objects/${id}/contract`);
+  const f = d.fields || {};
+  const st = d.parties;
+  const signed = st.filter((p) => p.signed_at).length;
+  const allSigned = d.fixed && signed === st.length && st.length > 0;
+  const meParty = st.find((p) => p.user_id === state.me.id);
+  const iSigned = meParty && meParty.signed_at;
+  const timeRu = (iso) => { const x = new Date(iso); return `${dateRu(iso.slice(0, 10))}, ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+  const fieldInput = (k, label, ph = '', type = 'text', mode = '') => `<label class="label" for="cf_${k}">${label}</label><input class="field" id="cf_${k}" type="${type}" ${mode ? `inputmode="${mode}"` : ''} value="${esc(f[k] ?? '')}" placeholder="${esc(ph)}">`;
   app.innerHTML = `
-    <div class="screen no-tab" style="padding-left:0;padding-right:0">
-      <div class="topbar" style="padding:0 20px">${backBtn(`#/o/${id}`)}<div class="title"><b>Договор дольщиков</b><small>Română</small></div><div class="spacer44"></div></div>
-      <div class="muted" style="font-size:12px;line-height:1.45;margin:14px 20px 0">Договор формируется на румынском языке по данным объекта. Это шаблон: перед подписанием покажите его юристу или нотариусу.</div>
-      <div style="padding:12px 20px 0"><button class="btn" id="print">Распечатать / PDF</button></div>
-      <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:75vh;border:0;margin-top:14px;background:#E9E7E1"></iframe>
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn(`#/o/${id}`)}<div class="title"><b>Договор дольщиков</b><small>Acord de investiție comună · RO</small></div><div class="spacer44"></div></div>
+
+      <div class="card ${allSigned ? 'green' : d.fixed ? 'gold' : ''}" style="margin-top:18px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <b style="font-size:15px">${allSigned ? 'Подписан всеми сторонами' : d.fixed ? 'На подписи' : 'Черновик'}</b>
+          ${d.fixed ? `<span class="num" style="font-size:13px">${signed} из ${st.length}</span>` : ''}
+        </div>
+        ${d.fixed ? `<div style="display:flex;gap:4px;margin-top:10px">${st.map((p) => `<i style="flex:1;height:4px;border-radius:2px;background:${p.signed_at ? 'var(--ok)' : 'var(--line2)'}"></i>`).join('')}</div>` : `<div class="muted" style="font-size:13px;line-height:1.45;margin-top:6px">${d.me.isCreator ? 'Заполните данные договора и отправьте его на подпись. Каждая сторона распишется в приложении.' : 'Создатель ещё не отправил договор на подпись. Пока заполните свои данные.'}</div>`}
+        <div class="rows" style="margin-top:6px">${st.map((p) => `
+          <div class="row" style="padding:10px 0">${avatar(p.user_id, p.name)}
+            <div class="grow"><div class="t" style="font-size:14px">${esc(p.name)}${p.user_id === state.me.id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
+              <div class="s">${ROLE[p.role]}${p.has_details ? '' : ' · <span class="red">нет IDNP или адреса</span>'}</div></div>
+            ${p.signed_at ? `<span class="signed-pill">${I.check}Подписал · ${timeRu(p.signed_at)}</span>` : d.fixed ? '<span class="muted" style="font-size:12px">ждём подписи</span>' : ''}
+          </div>`).join('')}</div>
+        ${d.version && d.version.stale ? `<div class="warn">Условия объекта изменились после отправки договора на подпись (доли, суммы или данные).${d.me.isCreator ? ' Отправьте новую редакцию — подписи придётся поставить заново.' : ' Создатель может отправить новую редакцию.'}</div>` : ''}
+        ${d.me.is_party && d.fixed && !iSigned ? `<button class="btn" id="sign" style="margin-top:14px">Подписать договор</button>` : ''}
+        ${d.me.isCreator ? `<button class="btn ${d.fixed ? 'ghost' : ''}" id="fix" style="margin-top:10px">${d.fixed ? 'Отправить новую редакцию на подпись' : 'Отправить на подпись'}</button>` : ''}
+      </div>
+
+      ${d.me.is_party || d.live_parties.some((p) => p.user_id === state.me.id) ? `
+      <div class="label">Мои данные для договора</div>
+      <form class="card" id="mine" novalidate>
+        <label class="label" for="idnp" style="margin-top:0">IDNP</label>
+        <input class="field" id="idnp" inputmode="numeric" maxlength="13" value="${esc(d.me.idnp)}" placeholder="13 цифр">
+        <label class="label" for="addr">Адрес проживания (domiciliu)</label>
+        <input class="field" id="addr" value="${esc(d.me.address)}" placeholder="Город, улица, дом, квартира">
+        <button class="btn ghost sm" style="margin-top:12px;width:100%">Сохранить мои данные</button>
+      </form>` : ''}
+
+      ${d.me.isCreator ? `
+      <div class="label">Данные договора · заполняет создатель</div>
+      <form class="card" id="cf" novalidate>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+          <div>${fieldInput('number', 'Номер договора', 'Напр. 1')}</div>
+          <div>${fieldInput('city', 'Город', 'mun. Chișinău')}</div>
+        </div>
+        ${fieldInput('contract_date', 'Дата договора', '', 'date')}
+        ${fieldInput('property_address', 'Адрес квартиры', 'Улица, дом, квартира')}
+        ${fieldInput('cadastral', 'Кадастровый номер', '0100xxxxx.xx.xxx')}
+        <label class="label" for="cf_owner">На кого оформлена квартира</label>
+        <select class="field" id="cf_owner">
+          <option value="">— указать вручную —</option>
+          ${d.live_parties.map((p) => `<option value="${p.user_id}" ${Number(f.owner_user_id) === p.user_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select>
+        <div id="ownerManual" style="${f.owner_user_id ? 'display:none' : ''}">${fieldInput('owner_name', 'ФИО владельца', 'Если не участник')}</div>
+        ${d.installment ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px"><div>${fieldInput('installment_no', 'Договор рассрочки №')}</div><div>${fieldInput('installment_date', 'от', '', 'date')}</div></div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+          <div>${fieldInput('overrun_pct', 'Перерасход без согласия, %', '10', 'text', 'numeric')}</div>
+          <div>${fieldInput('payout_days', 'Выплата после продажи, дней', '10', 'text', 'numeric')}</div>
+        </div>
+        <button class="btn ghost sm" style="margin-top:14px;width:100%">Сохранить данные договора</button>
+      </form>` : ''}
+
+      <div class="label" style="display:flex;justify-content:space-between;align-items:center"><span>Текст договора · Română</span><button class="link-btn" id="print">Распечатать / PDF</button></div>
+      <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:70vh;border:0;border-radius:16px;background:#E9E7E1"></iframe>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Договор заполняется автоматически по данным объекта и участников. Это шаблон: перед подписанием покажите его юристу или нотариусу.</div>
     </div>`;
   const frame = app.querySelector('#doc');
   frame.srcdoc = d.html;
@@ -350,6 +410,90 @@ async function viewContract(id) {
     } else {
       try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { window.print(); }
     }
+  };
+  const mine = app.querySelector('#mine');
+  if (mine) mine.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('PATCH', '/api/me', { idnp: app.querySelector('#idnp').value, address: app.querySelector('#addr').value }); toast('Сохранено', true); viewContract(id); } catch (ex) { toast(ex.message); }
+  };
+  const cf = app.querySelector('#cf');
+  if (cf) {
+    const owner = app.querySelector('#cf_owner');
+    owner.onchange = () => { app.querySelector('#ownerManual').style.display = owner.value ? 'none' : ''; };
+    cf.onsubmit = async (e) => {
+      e.preventDefault();
+      const v = (k) => { const el = app.querySelector(`#cf_${k}`); return el ? el.value : ''; };
+      try {
+        await api('PUT', `/api/objects/${id}/contract-fields`, {
+          number: v('number'), city: v('city'), contract_date: v('contract_date'), property_address: v('property_address'), cadastral: v('cadastral'),
+          owner_user_id: owner.value || null, owner_name: owner.value ? '' : v('owner_name'), installment_no: v('installment_no'), installment_date: v('installment_date'),
+          overrun_pct: v('overrun_pct'), payout_days: v('payout_days')
+        });
+        toast('Сохранено', true);
+        viewContract(id);
+      } catch (ex) { toast(ex.message); }
+    };
+  }
+  const fix = app.querySelector('#fix');
+  if (fix) fix.onclick = async () => {
+    if (!ask(d.fixed ? 'Отправить новую редакцию? Все подписи придётся поставить заново.' : 'Отправить договор участникам на подпись? Текст зафиксируется в текущем виде.')) return;
+    try { await api('POST', `/api/objects/${id}/contract/fix`); delete state.cache[id]; toast('Договор отправлен на подпись', true); viewContract(id); } catch (ex) { toast(ex.message); }
+  };
+  const sign = app.querySelector('#sign');
+  if (sign) sign.onclick = () => {
+    if (!d.me.idnp || !d.me.address) { toast('Сначала заполните IDNP и адрес'); app.querySelector('#idnp').focus(); return; }
+    openSignPad(async (png) => {
+      await api('POST', `/api/objects/${id}/contract/sign`, { signature: png, agree: true, version_id: d.version.id });
+      delete state.cache[id];
+      toast('Договор подписан', true);
+      viewContract(id);
+    });
+  };
+}
+
+// Подпись пальцем
+function openSignPad(onDone) {
+  const v = document.createElement('div');
+  v.className = 'viewer sign-pad';
+  v.setAttribute('role', 'dialog');
+  v.setAttribute('aria-label', 'Подпись');
+  v.innerHTML = `
+    <div class="top"><button class="icon-btn" data-close aria-label="Закрыть">${I.close}</button><div style="font-weight:600">Ваша подпись</div><button class="link-btn" data-clear>Очистить</button></div>
+    <div style="padding:0 16px"><div class="muted" style="font-size:13px;margin-bottom:10px">Распишитесь пальцем в рамке</div>
+      <canvas aria-label="Поле для подписи"></canvas>
+      <label class="agree"><input type="checkbox" data-agree> <span>Я прочитал договор и согласен с его условиями. Am citit Acordul și sunt de acord.</span></label>
+      <button class="btn" data-ok disabled>Подписать</button></div>`;
+  document.body.appendChild(v);
+  const c = v.querySelector('canvas');
+  const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const w = Math.min(window.innerWidth - 32, 520);
+  const h = Math.round(w * 0.45);
+  c.style.width = w + 'px'; c.style.height = h + 'px';
+  c.width = Math.round(w * ratio); c.height = Math.round(h * ratio);
+  const ctx = c.getContext('2d');
+  ctx.scale(ratio, ratio);
+  ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#14213D';
+  let drawing = false, strokes = 0, last = null;
+  const pos = (e) => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const ok = v.querySelector('[data-ok]');
+  const agree = v.querySelector('[data-agree]');
+  const update = () => { ok.disabled = !(strokes > 0 && agree.checked); };
+  c.addEventListener('pointerdown', (e) => { drawing = true; last = pos(e); c.setPointerCapture(e.pointerId); e.preventDefault(); });
+  c.addEventListener('pointermove', (e) => {
+    if (!drawing) return;
+    const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last = p; e.preventDefault();
+  });
+  const end = () => { if (drawing) { drawing = false; strokes++; update(); } };
+  c.addEventListener('pointerup', end);
+  c.addEventListener('pointercancel', end);
+  agree.addEventListener('change', update);
+  v.querySelector('[data-clear]').onclick = () => { ctx.clearRect(0, 0, c.width, c.height); strokes = 0; update(); };
+  v.querySelector('[data-close]').onclick = () => v.remove();
+  ok.onclick = async () => {
+    ok.disabled = true;
+    try { await onDone(c.toDataURL('image/png')); v.remove(); } catch (ex) { toast(ex.message); update(); }
   };
 }
 
@@ -493,7 +637,7 @@ async function viewObject(id, filter = 'all') {
   const entries = d.entries.filter((e) => filter === 'all' || e.kind === filter);
   const entryRow = (e) => {
     const title = e.note || e.category || KIND[e.kind];
-    const sub = [e.kind === 'plan' ? 'план' : e.kind === 'in' ? 'взнос' : e.source === 'pool' ? 'из общих' : 'из своих', e.kind !== 'in' && e.note ? e.category : null, dateRu(e.entry_date)].filter(Boolean).join(' · ');
+    const sub = [e.kind === 'plan' ? 'план' : e.kind === 'in' ? 'взнос' : null, e.kind !== 'in' && e.note ? e.category : null, dateRu(e.entry_date)].filter(Boolean).join(' · ');
     const amt = e.kind === 'in' ? `<span class="gold">+${fmt(e.amount)} €</span>` : e.kind === 'out' ? `−${fmt(e.amount)} €` : `<span class="muted">${fmt(e.amount)} €</span>`;
     return `<a class="row" href="#/e/${e.id}">${avatar(e.user_id, e.author)}
       <div class="grow"><div class="t" style="font-size:14px">${esc(title)}</div>
@@ -506,7 +650,7 @@ async function viewObject(id, filter = 'all') {
       <div class="topbar">${backBtn('#/')}
         <div style="display:flex;gap:8px">
           ${me.isCreator ? `<a class="icon-btn" href="#/o/${id}/edit" aria-label="Редактировать объект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></a>` : ''}
-          <a class="icon-btn" href="#/o/${id}/contract" aria-label="Договор дольщиков"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></a>
+          <a class="icon-btn ${o.contract && o.contract.all_signed ? 'ok' : o.contract && o.contract.fixed ? 'pending' : ''}" href="#/o/${id}/contract" aria-label="Договор дольщиков">${o.contract && o.contract.fixed ? `<span class="dot-badge">${o.contract.all_signed ? '✓' : `${o.contract.signed}/${o.contract.total}`}</span>` : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></a>
           <a class="icon-btn" href="#/o/${id}/delete" aria-label="Удаление и выгрузка">${I.more}</a>
         </div>
       </div>
@@ -548,7 +692,6 @@ async function viewObject(id, filter = 'all') {
         <div class="stat"><div class="k">Затраты · факт</div><div class="v gold">${fmt(c.factTotal)}</div></div>
         <div class="stat"><div class="k">Затраты · план</div><div class="v">${fmt(c.planTotal)}</div></div>
       </div>
-      ${c.totalIn > 0 ? `<div class="muted" style="font-size:12px;margin-top:8px">В общем котле: <span class="num" style="color:var(--text)">${money(c.poolBalance)}</span></div>` : ''}
 
       <a class="card" href="#/o/${id}/forecast" style="display:flex;align-items:center;gap:14px;margin-top:12px;color:var(--text)">
         <div style="flex:1">${c.profit !== null
@@ -568,6 +711,10 @@ async function viewObject(id, filter = 'all') {
             <div class="r num" style="font-size:13px">${memberLine(m)}</div></div>`).join('')}</div>
       </div>
 
+      ${o.contract && o.contract.fixed ? `<a class="card ${o.contract.all_signed ? 'green' : 'gold'}" href="#/o/${id}/contract" style="display:flex;align-items:center;gap:12px;margin-top:10px;color:var(--text)">
+        <span style="width:22px;height:22px;display:inline-flex;color:${o.contract.all_signed ? 'var(--ok)' : 'var(--gold)'}">${I.check}</span>
+        <div style="flex:1"><div style="font-size:15px;font-weight:500">${o.contract.all_signed ? 'Договор подписан всеми' : 'Договор на подписи'}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Подписали ${o.contract.signed} из ${o.contract.total}${!o.contract.all_signed && !o.contract.signers.includes(state.me.id) && d.members.some((m) => m.user_id === state.me.id && m.role !== 'viewer') ? ' · нужна ваша подпись' : ''}</div></div>${I.chev}</a>` : ''}
       ${c.settlement.length ? `<div class="card gold" style="margin-top:10px">
         <div style="font-size:12px;color:#B8A98A">Взаиморасчёт: чтобы вложения совпали с долями</div>
         ${c.settlement.map((s) => `<div style="font-size:15px;font-weight:500;margin-top:6px">${esc(s.fromName)} → ${esc(s.toName)} · <span class="num">${money(s.amount)}</span></div>`).join('')}
@@ -613,9 +760,7 @@ async function viewAdd(id, presetKind) {
           <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px">${avatar(state.me.id, state.me.name)}
             <div style="flex:1"><div style="font-weight:500">${esc(state.me.name)} <span class="muted" style="font-weight:400">· вы</span></div><div class="muted" style="font-size:12px;margin-top:2px">Только свои операции, за партнёра нельзя</div></div>
             <span class="muted" style="width:16px;height:16px;display:inline-flex" role="img" aria-label="Нельзя изменить">${I.lock}</span></div>`}
-        ${isOut ? `<span class="label">Из чьих денег</span>
-          <div class="seg" style="grid-template-columns:1fr 1fr"><button data-src="own" class="${s.source === 'own' ? 'on' : ''}">Из своих</button><button data-src="pool" class="${s.source === 'pool' ? 'on' : ''}">Из общих</button></div>
-          <div class="muted" style="font-size:12px;margin-top:6px">${s.source === 'own' ? 'Сумма засчитается как ваше вложение.' : 'Сумма спишется из общего котла (взносов).'}</div>` : ''}
+        ${isOut ? '<div class="muted" style="font-size:12px;margin-top:8px">Оплачено из ваших денег — сумма засчитается как ваше вложение.</div>' : ''}
         ${!isIn ? `<span class="label">Категория${foreman ? ' · прораб вносит только ремонт' : ''}</span>
           <div class="chips">${(foreman ? ['Ремонт'] : d.categories).map((c) => `<button data-c="${esc(c)}" class="${c === s.category ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>` : ''}
         <label class="label" for="note">Комментарий</label>
@@ -682,7 +827,6 @@ async function viewEntry(eid) {
       </div>
       <div class="card list" style="margin-top:20px">
         <div class="row">${avatar(e.user_id, e.author)}<div class="grow"><div class="t">${esc(e.author)}${e.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="s">${e.kind === 'in' ? 'внёс' : e.kind === 'out' ? 'оплатил' : 'запланировал'} · ${dateRu(e.entry_date)}</div></div></div>
-        ${e.kind === 'out' ? `<div class="row"><div class="grow muted" style="font-size:14px">Из чьих денег</div><div class="r">${e.source === 'pool' ? 'из общих' : 'из своих'}</div></div>` : ''}
         ${e.note ? `<div class="row"><div class="grow muted" style="font-size:14px">Комментарий</div><div class="r" style="max-width:60%;text-align:right">${esc(e.note)}</div></div>` : ''}
       </div>
       ${e.kind === 'out' ? `

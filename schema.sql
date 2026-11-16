@@ -115,3 +115,26 @@ CREATE TABLE IF NOT EXISTS contract_links (
   object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Данные для договора и подписи
+ALTER TABLE users ADD COLUMN IF NOT EXISTS idnp TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS contract_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
+CREATE TABLE IF NOT EXISTS contract_versions (
+  id SERIAL PRIMARY KEY,
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  data JSONB NOT NULL,
+  terms_hash TEXT NOT NULL,
+  created_by INT REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS contract_signatures (
+  version_id INT NOT NULL REFERENCES contract_versions(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  signature BYTEA NOT NULL,
+  idnp TEXT,
+  address TEXT,
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (version_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS contract_versions_object_idx ON contract_versions(object_id);

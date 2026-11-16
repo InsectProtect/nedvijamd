@@ -64,7 +64,7 @@ const tiny = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').
 await A('POST', `/api/objects/${oid}/entries`, { kind: 'in', amount: 44000 });
 await D('POST', `/api/objects/${oid}/entries`, { kind: 'in', amount: 38000 });
 r = await A('POST', `/api/objects/${oid}/entries`, { kind: 'out', source: 'pool', category: 'Покупка', amount: 68000 });
-ok(r.status === 200, 'pool expense');
+ok(r.status === 200, 'expense (own money)');
 await A('POST', `/api/objects/${oid}/entries`, { kind: 'out', source: 'pool', category: 'Нотариус и регистрация', amount: 1900 });
 r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', source: 'own', category: 'Мебель и техника', amount: 1240, note: 'Плитка', photos: [{ mime: 'image/jpeg', data: tiny }, { mime: 'image/jpeg', data: tiny }] });
 ok(r.status === 200, 'foreman expense with photos');
@@ -91,7 +91,6 @@ ok(c.profit === 21100, 'profit');
 const igor = det.data.members.find((m) => m.name.startsWith('Игорь'));
 ok(igor.payout === 2110, 'foreman 10%');
 ok(det.data.members.find((m) => m.name.startsWith('Артём')).payout === 9495, 'investor half of rest');
-ok(c.poolBalance === 12100, 'pool balance');
 ok(c.settlement.length > 0, 'settlement computed: ' + JSON.stringify(c.settlement));
 
 // чеки
@@ -105,7 +104,7 @@ ok(r.status === 401, 'receipt hidden from anonymous');
 
 // список
 r = await A('GET', '/api/objects');
-ok(r.data.objects.length === 1 && r.data.totals.invested === 44000 && r.data.totals.profit === 9495, 'home totals: ' + JSON.stringify(r.data.totals));
+ok(r.data.objects.length === 1 && r.data.totals.invested === 44000 + 68000 + 1900 && r.data.totals.profit === 9495, 'home totals: ' + JSON.stringify(r.data.totals));
 
 // договор
 r = await D('GET', `/api/objects/${oid}/contract`);
@@ -118,6 +117,46 @@ const ch = await cl.text();
 ok(cl.status === 200 && ch.includes('window.print()'), 'printable contract link works without session');
 r = await A('PATCH', '/api/me', { lang: 'ro' });
 ok(r.data.user.lang === 'ro', 'language saved');
+
+// подписание договора
+const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(400, 1)]).toString('base64');
+r = await D('GET', `/api/objects/${oid}/contract`);
+ok(r.data.fixed === false && r.data.parties.length === 3, 'draft contract with 3 parties (viewer excluded)');
+r = await D('PUT', `/api/objects/${oid}/contract-fields`, { number: 'X' });
+ok(r.status === 403, 'only creator fills contract fields');
+r = await A('PUT', `/api/objects/${oid}/contract-fields`, { number: '7', city: 'mun. Chișinău', property_address: 'str. Testului 1, ap. 5', cadastral: '0100123.456.01', owner_user_id: ids['Артём'], overrun_pct: 10, payout_days: 15 });
+ok(r.status === 200, 'contract fields saved');
+r = await A('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+ok(r.status === 400, 'cannot sign before contract is sent');
+r = await D('POST', `/api/objects/${oid}/contract/fix`);
+ok(r.status === 403, 'only creator sends contract');
+r = await A('POST', `/api/objects/${oid}/contract/fix`);
+ok(r.status === 200 && r.data.version_id, 'contract fixed');
+r = await A('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+ok(r.status === 400, 'IDNP required to sign');
+r = await A('PATCH', '/api/me', { idnp: '123', address: 'x' });
+ok(r.status === 400, 'bad IDNP rejected');
+await A('PATCH', '/api/me', { idnp: '2001234567890', address: 'mun. Chișinău, str. Florilor 3' });
+r = await A('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+ok(r.status === 200 && r.data.signed === 1 && !r.data.all_signed, 'Артём signed 1/3');
+r = await B('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+ok(r.status === 403, 'viewer is not a party');
+await D('PATCH', '/api/me', { idnp: '2009876543210', address: 'or. Ialoveni' });
+await I('PATCH', '/api/me', { idnp: '2005555555555', address: 'or. Orhei' });
+await D('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+r = await I('POST', `/api/objects/${oid}/contract/sign`, { signature: png, agree: true });
+ok(r.data.all_signed === true, 'all parties signed');
+r = await B('GET', `/api/objects/${oid}`);
+ok(r.data.object.contract.all_signed === true, 'object shows contract signed');
+r = await B('GET', `/api/objects/${oid}/contract`);
+ok(r.data.html.includes('semnat electronic') && r.data.html.includes('str. Testului 1, ap. 5') && r.data.html.includes('2009876543210') && r.data.html.includes('0100123.456.01') && !r.data.html.includes('PROIECT'), 'signed contract filled in');
+ok(r.data.version.stale === false, 'contract not stale');
+await A('PUT', `/api/objects/${oid}/shares`, { members: [{ user_id: ids['Артём'], share_pct: 60 }, { user_id: ids['Денис'], share_pct: 40 }, { user_id: ids['Игорь'], foreman_mode: 'pct', foreman_value: 10 }] });
+r = await D('GET', `/api/objects/${oid}/contract`);
+ok(r.data.version.stale === true, 'changing shares marks contract stale');
+await A('PUT', `/api/objects/${oid}/shares`, { members: [{ user_id: ids['Артём'], share_pct: 50 }, { user_id: ids['Денис'], share_pct: 50 }, { user_id: ids['Игорь'], foreman_mode: 'pct', foreman_value: 10 }] });
+r = await D('GET', `/api/objects/${oid}/contract`);
+ok(r.data.version.stale === false, 'reverting shares clears stale');
 
 // удаление операции с согласия всех
 r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 300, note: 'Ошибка' });

@@ -163,3 +163,27 @@ select.field { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 .cover-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .cover-rm { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 18px; background: rgba(13,13,14,0.75); border: 1px solid #3A3A40; color: var(--text); padding: 0; display: flex; align-items: center; justify-content: center; }
 .cover-rm svg { width: 16px; height: 16px; }
+
+/* крупнее значки и отступ под кнопки Telegram */
+:root { --ok: #5FBF7F; }
+.icon-btn { width: 50px; height: 50px; border-radius: 25px; position: relative; }
+.icon-btn svg { width: 22px; height: 22px; }
+.spacer44 { width: 50px; }
+.icon-btn.ok { border-color: #2E6B45; background: #13261A; color: var(--ok); }
+.icon-btn.pending { border-color: var(--gold-line); color: var(--gold); }
+.dot-badge { position: absolute; top: -6px; right: -6px; min-width: 22px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--gold); color: #0D0D0E; font-size: 10px; font-weight: 700; line-height: 20px; text-align: center; }
+.icon-btn.ok .dot-badge { background: var(--ok); }
+.tg .screen { padding-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px) + 14px); }
+.tg .auth-wrap { padding-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px) + 32px); }
+.tg .viewer .top { padding-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px) + 10px); }
+.card.green { background: #10211A; border-color: #2E6B45; }
+.signed-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ok); background: #13261A; border: 1px solid #2E6B45; padding: 4px 8px; border-radius: 10px; white-space: nowrap; }
+.signed-pill svg { width: 13px; height: 13px; }
+.warn { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #2A1F12; border: 1px solid #5A4220; color: #E9C58A; font-size: 13px; line-height: 1.45; }
+.sign-pad canvas { display: block; background: #F6F4EF; border-radius: 16px; touch-action: none; }
+.sign-pad .agree { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 13px; line-height: 1.45; color: #C9C9CE; }
+.sign-pad .agree input { width: 20px; height: 20px; flex: none; margin-top: 1px; accent-color: #D4BF94; }
+
+/* iOS: поле даты не вылезает за край */
+input[type="date"].field { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; text-align: left; line-height: 52px; }
+input[type="date"].field::-webkit-date-and-time-value { text-align: left; }

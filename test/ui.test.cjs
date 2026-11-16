@@ -118,14 +118,14 @@ require('fs').mkdirSync(OUT, { recursive: true });
   };
   await add(a, 'in', '44000', null, 'Перевод на общий счёт');
   await add(d, 'in', '38000', null, 'Перевод на общий счёт');
-  await add(a, 'out', '68000', 'Покупка', 'Покупка по договору', 'pool');
-  await add(a, 'out', '1900', 'Нотариус и регистрация', 'Нотариус', 'pool');
+  await add(a, 'out', '68000', 'Покупка', 'Покупка по договору');
+  await add(a, 'out', '1900', 'Нотариус и регистрация', 'Нотариус');
   await add(a, 'plan', '68000', 'Покупка');
   await add(a, 'plan', '14000', 'Ремонт');
   await add(a, 'plan', '4500', 'Мебель и техника');
   await add(a, 'plan', '1800', 'Нотариус и регистрация');
   await add(a, 'plan', '2400', 'Налоги');
-  await add(i, 'out', '1240', null, 'Плитка, санузел', 'own', receipt);
+  await add(i, 'out', '1240', null, 'Плитка, санузел', null, receipt);
 
   await d.goto(`${BASE}/#/o/${oid}`);
   await d.waitForSelector('h1.h');
