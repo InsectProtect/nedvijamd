@@ -74,7 +74,14 @@ async function setup(publicUrl) {
   });
   await call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Доля', web_app: { url: `${publicUrl}/` } } });
   await call('setMyCommands', { commands: [{ command: 'start', description: 'Открыть Долю' }] });
+  await call('setMyDescription', { description: 'Доля — учёт совместных вложений в недвижимость: взносы, расходы с чеками, план и факт, доли и прогноз прибыли. Нажмите «Запустить», затем кнопку «Доля».' });
   console.log(`Telegram-бот @${botUsername} подключён`);
+  // Диагностика: куда Telegram шлёт обновления и были ли ошибки доставки
+  setTimeout(async () => {
+    const info = await call('getWebhookInfo');
+    const menu = await call('getChatMenuButton', {});
+    console.log('telegram webhook:', JSON.stringify(info), 'menu:', JSON.stringify(menu));
+  }, 20000);
 }
 
 const escHtml = (s) => String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
