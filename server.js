@@ -147,7 +147,7 @@ async function notifyObject(objectId, actorId, text, hashPath, onlyUserIds) {
       if (Number(r.id) === Number(actorId)) continue;
       if (onlyUserIds && !onlyUserIds.includes(Number(r.id))) continue;
       const lang = r.lang === 'ro' ? 'ro' : 'ru';
-      const body = typeof text === 'function' ? text(lang) : pickLang(text, lang);
+      const body = typeof text === 'function' ? text(lang, Number(r.id)) : pickLang(text, lang);
       await tg.send(String(r.telegram_id), body, PUBLIC_URL ? appUrl(hashPath) : null, lang === 'ro' ? 'Deschide în Dolya' : 'Открыть в Доле');
     }
   } catch (e) {
@@ -503,6 +503,7 @@ route('GET', '/api/objects', async ({ user }) => {
   const list = [];
   let myInvested = 0;
   let myProfit = 0;
+  let myEarned = 0;
   const partners = new Set();
   for (const r of rows) {
     const { object, members, entries, advances } = await loadObject(r.id);
@@ -511,8 +512,16 @@ route('GET', '/api/objects', async ({ user }) => {
     members.forEach((m) => Number(m.user_id) !== Number(user.id) && partners.add(Number(m.user_id)));
     const mine = calc.invested[user.id] || 0;
     const myPayout = calc.payout[user.id];
-    myInvested += mine;
-    if (typeof myPayout === 'number') myProfit += myPayout;
+    const closed = !!calc.closed;
+    let paid = null;
+    if (closed) {
+      myEarned += typeof myPayout === 'number' ? myPayout : 0;
+      const pr = await db.query('SELECT paid_at FROM deal_payouts WHERE object_id = $1', [object.id]);
+      paid = { done: pr.filter((x) => x.paid_at).length, total: pr.length };
+    } else {
+      myInvested += mine;
+      if (typeof myPayout === 'number') myProfit += myPayout;
+    }
     list.push({
       id: object.id,
       name: object.name,
@@ -529,10 +538,15 @@ route('GET', '/api/objects', async ({ user }) => {
       my_profit: typeof myPayout === 'number' ? myPayout : null,
       has_forecast: calc.profit !== null,
       advance: (() => { const act = advances.find((x) => x.status === 'active'); return act ? { amount: Number(act.amount), valid_until: act.valid_until, days_left: Number(act.days_left) } : null; })(),
-      delete_requested: !!object.delete_requested_at
+      delete_requested: !!object.delete_requested_at,
+      closed,
+      sold_at: closed ? object.sold_at : null,
+      sold_price: closed ? Number(object.sold_price) : null,
+      profit_total: closed ? calc.profit : null,
+      payouts: paid
     });
   }
-  return { objects: list, totals: { invested: myInvested, profit: myProfit, partners: partners.size } };
+  return { objects: list, totals: { invested: myInvested, profit: myProfit, earned: myEarned, partners: partners.size } };
 });
 
 route('POST', '/api/objects', async ({ user, body }) => {
@@ -690,9 +704,13 @@ route('POST', '/api/objects/:id/close', async ({ user, params, body }) => {
   );
   const calc = await storePayouts(params.id);
   const oname = tg.escHtml(await objectName(params.id));
-  notifyObject(params.id, user.id, (lang) => lang === 'ro'
-    ? `🏁 <b>${oname}</b>\nTranzacția a fost închisă: vândut cu <b>${fmtEur(price)}</b>, profit ${fmtEur(calc.profit)}. Vedeți cine cui plătește în aplicație.`
-    : `🏁 <b>${oname}</b>\nСделка закрыта: продано за <b>${fmtEur(price)}</b>, прибыль ${fmtEur(calc.profit)}. Кто кому сколько платит — в приложении.`,
+  const earned = (uid) => (calc.closing && calc.closing.rows.find((r) => Number(r.user_id) === uid)) || null;
+  notifyObject(params.id, user.id, (lang, uid) => {
+    const r = earned(uid);
+    return lang === 'ro'
+      ? `🏁 <b>${oname}</b>\nTranzacția a fost închisă: vândut cu <b>${fmtEur(price)}</b>, profit ${fmtEur(calc.profit)}.${r ? `\nCâștigul dvs.: <b>${fmtEur(r.profit)}</b> · vi se cuvine ${fmtEur(r.total)}.` : ''}\nCine cui plătește — în aplicație.`
+      : `🏁 <b>${oname}</b>\nСделка закрыта: продано за <b>${fmtEur(price)}</b>, прибыль ${fmtEur(calc.profit)}.${r ? `\nВаш заработок: <b>${fmtEur(r.profit)}</b> · вам положено ${fmtEur(r.total)}.` : ''}\nКто кому сколько платит — в приложении.`;
+  },
     `/o/${params.id}/deal`);
   return { ok: true };
 });

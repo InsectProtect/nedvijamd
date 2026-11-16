@@ -1,0 +1,45 @@
+// Итог сделки и история на главной.
+const path = require('path');
+const G = require('child_process').execSync('npm root -g').toString().trim();
+const { chromium } = require(path.join(G, 'playwright'));
+const BASE = 'http://localhost:3999';
+(async () => {
+  const b = await chromium.launch();
+  const mk = async (lang) => {
+    const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com|telegram\.org|jsdelivr/, (r) => r.abort());
+    await ctx.addInitScript((l) => localStorage.setItem('dolya_lang', l), lang);
+    const p = await ctx.newPage(); p.on('pageerror', (e) => console.log('PAGEERROR', e.message)); p.on('dialog', (d) => d.accept()); return p;
+  };
+  const reg = async (p, f, l) => { await p.goto(BASE + '/#/register'); await p.fill('#fname', f); await p.fill('#lname', l); await p.fill('#email', `${f}${Date.now()}@h.md`); await p.fill('#pw', 'secret1'); await p.click('button.btn'); await p.waitForSelector('.hero-num'); };
+  const call = (p, m, u, body) => p.evaluate(async ([m, u, body]) => { const r = await fetch(u, { method: m, headers: { 'Content-Type': 'application/json', 'X-Session': localStorage.getItem('dolya_token') || '' }, body: body ? JSON.stringify(body) : undefined, credentials: 'include' }); return { s: r.status, d: await r.json().catch(() => null) }; }, [m, u, body]);
+  const a = await mk('ru'), d = await mk('ro');
+  await reg(a, 'Артём', 'Попов'); await reg(d, 'Денис', 'Руссу');
+  const mkObj = async (name, price) => (await call(a, 'POST', '/api/objects', { name, area: 50, purchase_price: price, sale_price: price * 1.3, status: 'ремонт' })).d;
+  const o1 = await mkObj('Ботаника', 60000); const o2 = await mkObj('Рышкановка', 45000);
+  const oid1 = (o1.object || o1).id, oid2 = (o2.object || o2).id;
+  const inv = (await call(a, 'POST', `/api/objects/${oid1}/invites`, { role: 'investor' })).d;
+  console.log('invite', inv && Object.keys(inv));
+  await call(d, 'POST', `/api/invites/${inv.token}/accept`);
+  const me = (await call(a, 'GET', '/api/me')).d; const md = (await call(d, 'GET', '/api/me')).d;
+  const ua = (me.user || me).id, ud = (md.user || md).id;
+  console.log('shares', (await call(a, 'PUT', `/api/objects/${oid1}/shares`, { members: [{ user_id: ua, share_pct: 60 }, { user_id: ud, share_pct: 40 }] })).s);
+  console.log('e1', (await call(a, 'POST', `/api/objects/${oid1}/entries`, { kind: 'out', amount: 40000, category: 'Покупка', note: 'Покупка' })).s);
+  console.log('e2', (await call(d, 'POST', `/api/objects/${oid1}/entries`, { kind: 'out', amount: 28000, category: 'Покупка', note: 'Доплата' })).s);
+  console.log('e3', (await call(d, 'POST', `/api/objects/${oid1}/entries`, { kind: 'out', amount: 9000, category: 'Ремонт', note: 'Ремонт' })).s);
+  const cl = await call(a, 'POST', `/api/objects/${oid1}/close`, { sold_price: 98000, receiver_id: ua });
+  console.log('close', cl.s, JSON.stringify(cl.d));
+  await a.goto(BASE + '/#/'); await a.reload(); await a.waitForSelector('.hero-num'); await a.waitForTimeout(500);
+  await a.screenshot({ path: '/tmp/h-home.png', fullPage: true });
+  await a.goto(`${BASE}/#/o/${oid1}/deal`); await a.waitForSelector('h1.h'); await a.waitForTimeout(400);
+  await a.screenshot({ path: '/tmp/h-deal.png', fullPage: true });
+  await a.goto(`${BASE}/#/o/${oid1}`); await a.waitForSelector('h1.h'); await a.waitForTimeout(400);
+  await a.screenshot({ path: '/tmp/h-obj.png' });
+  await d.goto(BASE + '/#/'); await d.reload(); await d.waitForSelector('.hero-num'); await d.waitForTimeout(500);
+  await d.screenshot({ path: '/tmp/h-home-ro.png', fullPage: true });
+  await d.goto(`${BASE}/#/o/${oid1}/deal`); await d.waitForSelector('h1.h'); await d.waitForTimeout(500);
+  await d.screenshot({ path: '/tmp/h-deal-ro.png', fullPage: true });
+  const left = await d.evaluate(() => { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); while (w.nextNode()) { const t = w.currentNode.nodeValue.trim(); if (/[А-Яа-яЁё]{3,}/.test(t) && !/Артём|Попов|Денис|Руссу|Ботаника/.test(t)) out.push(t); } return out; });
+  console.log('RO leftovers:', left);
+  await b.close();
+})().catch((e) => { console.error('FAIL', e); process.exit(1); });

@@ -277,7 +277,24 @@ async function viewHome() {
     if (o.role === 'foreman') return o.foreman_mode === 'pct' ? `прораб · ${pct(o.foreman_value)} прибыли` : o.foreman_mode === 'fix' ? `прораб · ${money(o.foreman_value)}` : 'прораб';
     return 'просмотр';
   };
-  const list = d.objects.map((o) => `
+  const active = d.objects.filter((o) => !o.closed);
+  const history = d.objects.filter((o) => o.closed).sort((a, b) => String(b.sold_at).localeCompare(String(a.sold_at)));
+  const histRow = (o) => {
+    const roi = o.my_invested > 0 && o.my_profit !== null ? (o.my_profit / o.my_invested) * 100 : null;
+    const allPaid = !o.payouts || o.payouts.done === o.payouts.total;
+    return `<a class="obj" href="#/o/${o.id}/deal">
+      ${o.photo ? `<span class="obj-thumb" style="background-image:url('${o.photo}')"></span>` : `<span class="obj-thumb empty">${I.grid}</span>`}
+      <div style="flex:1 1 auto;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="name">${esc(o.name)}</span><span class="badge продана">продана</span></div>
+        <div class="muted" style="font-size:12px;margin-top:6px">${dateRu(o.sold_at)} · ${money(o.sold_price)}</div>
+        <div style="font-size:12px;margin-top:4px" class="${allPaid ? 'okc' : 'muted'}">${allPaid ? 'выплаты завершены' : `выплаты ${o.payouts.done} из ${o.payouts.total}`}</div>
+      </div>
+      <div style="text-align:right;white-space:nowrap;flex:none">
+        ${o.my_profit !== null ? `<div class="display num ${o.my_profit >= 0 ? 'okc' : 'red'}" style="font-weight:600;font-size:15px">${signed(o.my_profit)} €</div><div class="muted" style="font-size:12px;margin-top:4px">${roi !== null ? 'заработал · ' + pct(roi) : 'заработал'}</div>` : '<div class="muted" style="font-size:12px">просмотр</div>'}
+      </div>
+    </a>`;
+  };
+  const list = active.map((o) => `
     <a class="obj" href="#/o/${o.id}">
       ${o.photo ? `<span class="obj-thumb" style="background-image:url('${o.photo}')"></span>` : `<span class="obj-thumb empty">${I.grid}</span>`}
       <div style="flex:1 1 auto;min-width:0">
@@ -302,12 +319,20 @@ async function viewHome() {
       </div>
       <div class="hero-label">Мои вложения</div>
       <div class="hero-num">${fmt(t.invested)} <span class="cur">€</span></div>
-      <div class="muted" style="font-size:13px;margin-top:4px">${d.objects.length} ${plural(d.objects.length, 'объект', 'объекта', 'объектов')} · ${t.partners} ${plural(t.partners, 'партнёр', 'партнёра', 'партнёров')}</div>
-      ${d.objects.some((o) => o.my_profit !== null) ? `<div class="chip">${I.trend}Моя прибыль ≈ ${signed(t.profit)} €</div>` : ''}
+      <div class="muted" style="font-size:13px;margin-top:4px">${active.length} ${plural(active.length, 'объект', 'объекта', 'объектов')} в работе · ${t.partners} ${plural(t.partners, 'партнёр', 'партнёра', 'партнёров')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${active.some((o) => o.my_profit !== null) ? `<div class="chip">${I.trend}Прибыль ≈ ${signed(t.profit)} €</div>` : ''}
+        ${history.length ? `<div class="chip" style="color:#8FC9A3">${I.check}Заработано ${signed(t.earned)} €</div>` : ''}
+      </div>
       <div class="section-h"><h2>Объекты</h2><a class="pill" href="#/new">${I.plusSm}Объект</a></div>
-      ${list || `<div class="card empty">Пока нет объектов.<br>Создайте первый и пригласите партнёров по ссылке.<div style="margin-top:16px"><a class="btn sm" href="#/new" style="display:inline-flex">Создать объект</a></div></div>`}
+      ${list || (history.length ? '<div class="card empty">Все сделки закрыты. Создайте новый объект.</div>' : `<div class="card empty">Пока нет объектов.<br>Создайте первый и пригласите партнёров по ссылке.<div style="margin-top:16px"><a class="btn sm" href="#/new" style="display:inline-flex">Создать объект</a></div></div>`)}
+      ${history.length ? `<details class="fold" data-fold="home-history" style="margin-top:22px" ${foldOpen('home-history', true) ? 'open' : ''}>
+        <summary><span class="chev" aria-hidden="true">${I.chev}</span><h2 style="font-size:17px;margin:0;flex:1">История сделок · ${history.length}</h2><span class="okc num" style="font-size:14px">${signed(t.earned)} €</span></summary>
+        ${history.map(histRow).join('')}
+      </details>` : ''}
     </div>
     ${tabbar('home', '#/new')}`;
+  bindFolds();
 }
 
 function plural(n, one, few, many) {
@@ -941,13 +966,14 @@ async function viewObject(id, filter = 'all') {
       ${d.deal ? `<a class="card green" href="#/o/${id}/deal" style="display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--text)">
         <div style="flex:1"><div style="font-size:12px;color:#8FC9A3">Сделка закрыта · ${dateRu(d.deal.sold_at)}</div>
         <div style="font-size:15px;font-weight:500;margin-top:4px">Продано за ${money(d.deal.sold_price)} · прибыль <span class="${c.profit >= 0 ? 'okc' : 'red'} num">${signed(c.profit)}\u00A0€</span></div>
+        ${(() => { const r = d.deal.rows.find((x) => x.user_id === me.user_id); return r ? `<div style="font-size:13px;margin-top:4px">Вы заработали <b class="num ${r.profit >= 0 ? 'okc' : 'red'}">${signed(r.profit)}\u00A0€</b> · получаете ${money(r.total)}</div>` : ''; })()}
         <div class="muted" style="font-size:12px;margin-top:2px">Выплаты: ${d.deal.transfers.filter((t) => t.paid_at).length} из ${d.deal.transfers.length}${d.deal.outdated ? ' · <span class="red">нужно пересчитать</span>' : ''}</div></div>${I.chev}</a>` : ''}
-      <a class="card" href="#/o/${id}/forecast" style="display:flex;align-items:center;gap:14px;margin-top:12px;color:var(--text)">
+      ${d.deal ? '' : `<a class="card" href="#/o/${id}/forecast" style="display:flex;align-items:center;gap:14px;margin-top:12px;color:var(--text)">
         <div style="flex:1">${c.profit !== null
           ? `<div class="muted" style="font-size:12px">Прогноз продажи · ≈ ${money(c.salePrice)}</div>
              <div style="font-size:15px;font-weight:500;margin-top:4px">Прибыль ≈ <span class="${c.profit >= 0 ? 'gold' : 'red'} num">${signed(c.profit)} €</span>${c.roi !== null ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${pct(c.roi)}</span>` : ''}</div>`
           : `<div class="muted" style="font-size:12px">Прогноз продажи</div><div style="font-size:15px;margin-top:4px">План, факт и ${me.isCreator ? 'цена продажи' : 'прибыль'}</div>`}</div>${I.chev}
-      </a>
+      </a>`}
 
       <div class="card list" style="margin-top:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;font-size:13px">
@@ -1342,6 +1368,9 @@ async function viewDeal(id) {
     return;
   }
   const paidCount = deal.transfers.filter((t) => t.paid_at).length;
+  const earners = [...deal.rows].sort((x, y) => y.profit - x.profit);
+  const months = (() => { const st = new Date(o.created_at), en = new Date(deal.sold_at); const m = Math.round((en - st) / (30.44 * 864e5)); return m >= 1 ? m : null; })();
+  const roiAll = c.totalInvested > 0 ? (c.profit / c.totalInvested) * 100 : null;
   app.innerHTML = `
     <div class="screen no-tab">
       <div class="topbar">${backBtn(`#/o/${id}`)}<div class="spacer44"></div></div>
@@ -1353,14 +1382,16 @@ async function viewDeal(id) {
         ${c.rentTotal ? `<div class="kv"><span class="muted">Аренда</span><span class="num okc">+${fmt(c.rentTotal)}\u00A0€</span></div>` : ''}
         ${c.advanceKept ? `<div class="kv"><span class="muted">Аванс, оставшийся у нас</span><span class="num okc">+${fmt(c.advanceKept)}\u00A0€</span></div>` : ''}
         <div class="kv" style="border-top:1px solid #2E6B45;margin-top:6px;padding-top:8px"><b>Прибыль</b><b class="num ${c.profit >= 0 ? 'okc' : 'red'}">${signed(c.profit)}\u00A0€</b></div>
+        ${roiAll !== null ? `<div class="kv"><span class="muted">Доходность</span><span class="num">${pct(roiAll)}${months ? ` · <span data-nt>${I18N.lang === 'ro' ? `în ${months} ${months === 1 ? 'lună' : 'luni'}` : `за ${months} ${plural(months, 'месяц', 'месяца', 'месяцев')}`}</span>` : ''}</span></div>` : ''}
         <div class="muted" style="font-size:12px;margin-top:6px">Деньги от покупателя у: ${esc(deal.receiver_name || '—')}</div>
       </div>
       ${deal.outdated ? `<div class="warn">После закрытия изменились операции — суммы выплат устарели.${me.isCreator ? '' : ' Создатель может пересчитать.'}</div>${me.isCreator ? '<button class="btn sm" id="recalc" style="margin-top:10px;width:100%">Пересчитать выплаты</button>' : ''}` : ''}
-      <div class="label">Кому сколько положено</div>
-      <div class="card list">${deal.rows.map((r) => `<div class="row">${avatar(r.user_id, r.name)}
+      <div class="label">Кто сколько заработал</div>
+      <div class="card list">${earners.map((r) => `<div class="row">${avatar(r.user_id, r.name)}
         <div class="grow"><div class="t" style="font-size:14px">${esc(r.name)}${r.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
-          <div class="s num">вложил ${fmt(r.invested)} € + прибыль ${fmt(r.profit)} €</div></div>
-        <div class="r"><div class="display num" style="font-weight:600">${money(r.total)}</div>${r.cash ? `<div class="muted num" style="font-size:11px">на руках ${fmt(r.cash)} €</div>` : ''}</div></div>`).join('')}</div>
+          <div class="s num">вложил ${fmt(r.invested)} € → получает ${fmt(r.total)} €</div>
+          ${r.cash ? `<div class="s num" style="font-size:11px">уже на руках ${fmt(r.cash)} €</div>` : ''}</div>
+        <div class="r"><div class="display num ${r.profit >= 0 ? 'okc' : 'red'}" style="font-weight:600;font-size:17px">${signed(r.profit)} €</div>${r.invested > 0 ? `<div class="muted num" style="font-size:11px">${pct((r.profit / r.invested) * 100)} на вложения</div>` : ''}</div></div>`).join('')}</div>
       <div class="label" style="display:flex;justify-content:space-between"><span>Выплаты</span><span>${paidCount} из ${deal.transfers.length}</span></div>
       ${deal.transfers.length ? `<div class="card list">${deal.transfers.map((t) => `<div class="row">
         <div class="grow"><div class="t" style="font-size:14px">${esc(t.fromName)} → ${esc(t.toName)}</div><div class="s">${t.paid_at ? `выплачено · ${dateRu(String(t.paid_at).slice(0, 10))}` : 'ещё не выплачено'}</div></div>
