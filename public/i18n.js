@@ -337,6 +337,12 @@
     'Договор формируется на румынском языке по данным объекта. Это шаблон: перед подписанием покажите его юристу или нотариусу.': 'Contractul se generează în limba română pe baza datelor obiectului. Este un model: înainte de semnare arătați-l unui jurist sau notar.',
 
     'Оплачено из ваших денег — сумма засчитается как ваше вложение.': 'Achitat din banii dvs. — suma se va considera investiția dvs.',
+    'Без ремонта': 'Fără reparație',
+    'Будет ремонт': 'Cu reparație',
+    'Примерная стоимость ремонта, €': 'Costul aproximativ al reparației, €',
+    'Например: 12000': 'De exemplu: 12000',
+    'Это план по ремонту. Фактические расходы на ремонт сравниваются с ним, перерасход подсвечивается.': 'Acesta este planul reparației. Cheltuielile reale pentru reparație se compară cu el, depășirea este evidențiată.',
+    'Укажите в объекте стоимость покупки и примерную стоимость ремонта, затем добавляйте расходы — здесь появится сравнение плана и факта.': 'Indicați în obiect prețul de cumpărare și costul aproximativ al reparației, apoi adăugați cheltuieli — aici va apărea comparația planului cu realul.',
     // договор и подпись
     'Подписан всеми сторонами': 'Semnat de toate Părțile',
     'На подписи': 'În curs de semnare',

@@ -783,7 +783,7 @@ route('DELETE', '/api/objects/:id/members/:uid', async ({ user, params }) => {
 route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
   const me = await membership(params.id, user.id);
   if (me.role === 'viewer') fail(403, 'Роль «Просмотр» не может добавлять операции');
-  const kind = ['in', 'out', 'plan'].includes(body.kind) ? body.kind : fail(400, 'Неизвестный тип операции');
+  const kind = ['in', 'out'].includes(body.kind) ? body.kind : fail(400, 'Неизвестный тип операции');
   let category = kind === 'in' ? null : str(body.category, 60) || 'Прочее';
   if (me.role === 'foreman') {
     if (kind === 'in') fail(403, 'Прораб не вносит взносы, только расходы на ремонт');

@@ -32,7 +32,7 @@ const USER = /Артём|Попов|Денис|Руссу|Игорь|Чебан|
   await a.waitForSelector('.hero-num'); await scan(a, 'home-empty');
   await a.goto(BASE + '/#/new'); await scan(a, 'new');
   await a.click('[data-inst="1"]'); await scan(a, 'new-inst');
-  await a.fill('#name', 'Ботаника'); await a.fill('#area', '54'); await a.fill('#buy', '68000'); await a.fill('#repair', '14000'); await a.fill('#sale', '105000'); await a.fill('#monthly', '1000');
+  await a.fill('#name', 'Ботаника'); await a.fill('#area', '54'); await a.fill('#buy', '68000'); await a.click('[data-rep="1"]'); await a.fill('#repair', '14000'); await a.fill('#sale', '105000'); await a.fill('#monthly', '1000');
   await a.click('#f .btn'); await a.waitForSelector('h1.h');
   const oid = a.url().match(/#\/o\/(\d+)/)[1];
   await a.goto(`${BASE}/#/o/${oid}/members`); await scan(a, 'members');
@@ -41,7 +41,7 @@ const USER = /Артём|Попов|Денис|Руссу|Игорь|Чебан|
   await d.goto(`${BASE}/#/join/${tok}`); await scan(d, 'join-anon');
   await d.click('text=Înregistrare'); await d.fill('#fname', 'Денис'); await d.fill('#lname', 'Руссу'); await d.fill('#email', `rod${Date.now()}@t.md`); await d.fill('#pw', 'secret1'); await d.click('button.btn');
   await d.waitForSelector('#acc'); await scan(d, 'join'); await d.click('#acc'); await d.waitForSelector('h1.h');
-  for (const k of ['in', 'out', 'plan']) {
+  for (const k of ['in', 'out']) {
     await a.goto(`${BASE}/#/o/${oid}/add`); await a.waitForSelector('#amt'); await a.click(`[data-k="${k}"]`); await scan(a, 'add-' + k);
     await a.fill('#amt', k === 'in' ? '50000' : k === 'out' ? '1500' : '4000'); if (k !== 'in') await a.click('[data-c="Мебель и техника"]');
     await a.fill('#note', 'Плитка'); await a.click('#save'); await a.waitForSelector('h1.h');

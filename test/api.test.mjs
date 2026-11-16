@@ -74,8 +74,9 @@ ok(r.status === 403, 'foreman cannot contribute');
 r = await B('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 100 });
 ok(r.status === 403, 'viewer cannot add');
 
-await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Ремонт', amount: 14000 });
-await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Нотариус и регистрация', amount: 1800 });
+r = await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Ремонт', amount: 14000 });
+ok(r.status === 400, 'plan operations are no longer allowed');
+await A('PATCH', `/api/objects/${oid}`, { name: 'Ботаника, 2 комн.', area: 54, purchase_price: 68000, repair_budget: 14000, sale_price: 105000, status: 'ремонт' });
 r = await D('DELETE', `/api/entries/${fEntry}`);
 ok(r.status === 403, 'cannot delete others entry');
 
@@ -83,9 +84,9 @@ det = await A('GET', `/api/objects/${oid}`);
 const c = det.data.calc;
 console.log(JSON.stringify(c, null, 1).slice(0, 1500));
 ok(c.factTotal === 71140, 'fact total');
-ok(c.planTotal === 83800, 'plan total');
+ok(c.planTotal === 82000, 'plan total from purchase price + repair estimate');
 ok(det.data.entries.find((e) => e.id === fEntry).category === 'Ремонт', 'foreman category forced to Ремонт');
-// forecast costs = Покупка 68000 + Ремонт max(14000,1240) + Нотариус max(1800,1900) = 83900
+// forecast costs = Покупка 68000 + Ремонт max(14000,1240) + Нотариус 1900 = 83900
 ok(c.forecastCosts === 83900, 'forecast costs uses max(plan,fact)');
 ok(c.profit === 21100, 'profit');
 const igor = det.data.members.find((m) => m.name.startsWith('Игорь'));

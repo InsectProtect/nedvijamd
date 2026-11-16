@@ -555,6 +555,13 @@ async function viewObjectForm(id) {
         <input class="field" id="area" inputmode="decimal" value="${esc(o.area ?? '')}">
         <label class="label" for="buy">Стоимость покупки, €</label>
         <input class="field" id="buy" inputmode="decimal" value="${esc(o.purchase_price ?? '')}" placeholder="Цена квартиры по договору">
+        <span class="label">Ремонт</span>
+        <div class="seg" style="grid-template-columns:1fr 1fr"><button type="button" data-rep="0" class="${o.repair_budget ? '' : 'on'}">Без ремонта</button><button type="button" data-rep="1" class="${o.repair_budget ? 'on' : ''}">Будет ремонт</button></div>
+        <div id="repBox" style="${o.repair_budget ? '' : 'display:none'}">
+          <label class="label" for="repair">Примерная стоимость ремонта, €</label>
+          <input class="field" id="repair" inputmode="decimal" value="${esc(o.repair_budget ?? '')}" placeholder="Например: 12000">
+          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.45">Это план по ремонту. Фактические расходы на ремонт сравниваются с ним, перерасход подсвечивается.</div>
+        </div>
         <span class="label">Как покупаем</span>
         <div class="seg" style="grid-template-columns:1fr 1fr"><button type="button" data-inst="0" class="${o.installment ? '' : 'on'}">Сразу</button><button type="button" data-inst="1" class="${o.installment ? 'on' : ''}">В рассрочку</button></div>
         <div id="instBox" style="${o.installment ? '' : 'display:none'}">
@@ -562,8 +569,6 @@ async function viewObjectForm(id) {
           <input class="field" id="monthly" inputmode="decimal" value="${esc(o.installment_monthly ?? '')}" placeholder="Необязательно — для расчёта, сколько платежей осталось">
           <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.45">«Стоимость покупки» — полная сумма по договору рассрочки. Каждый платёж вносите как расход в категории «Покупка» — приложение покажет, сколько выплачено и сколько осталось.</div>
         </div>
-        <label class="label" for="repair">Ориентировочная стоимость ремонта, €</label>
-        <input class="field" id="repair" inputmode="decimal" value="${esc(o.repair_budget ?? '')}" placeholder="Если ремонт планируется">
         <label class="label" for="status">Статус</label>
         <select class="field" id="status">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
         <label class="label" for="sale">Ориентировочная цена продажи, €</label>
@@ -572,6 +577,13 @@ async function viewObjectForm(id) {
         <button class="btn" style="margin-top:24px">${id ? 'Сохранить' : 'Создать объект'}</button>
       </form>
     </div>`;
+  let rep = !!o.repair_budget;
+  on('[data-rep]', 'click', (e) => {
+    rep = e.currentTarget.dataset.rep === '1';
+    app.querySelectorAll('[data-rep]').forEach((b) => b.classList.toggle('on', (b.dataset.rep === '1') === rep));
+    app.querySelector('#repBox').style.display = rep ? '' : 'none';
+    if (rep) app.querySelector('#repair').focus();
+  });
   let inst = !!o.installment;
   on('[data-inst]', 'click', (e) => {
     inst = e.currentTarget.dataset.inst === '1';
@@ -609,7 +621,7 @@ async function viewObjectForm(id) {
       purchase_price: app.querySelector('#buy').value.replace(/\s/g, '').replace(',', '.'),
       sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.'),
       installment: inst,
-      repair_budget: app.querySelector('#repair').value.replace(/\s/g, '').replace(',', '.'),
+      repair_budget: rep ? app.querySelector('#repair').value.replace(/\s/g, '').replace(',', '.') : '',
       installment_monthly: app.querySelector('#monthly').value.replace(/\s/g, '').replace(',', '.')
     };
     try {
@@ -633,7 +645,7 @@ async function viewObject(id, filter = 'all') {
   state.cache[id] = d;
   const { object: o, calc: c, me } = d;
   const meName = (m) => esc(m.name) + (m.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : '');
-  const filters = [['all', 'Все'], ['in', 'Взносы'], ['out', 'Факт'], ['plan', 'План']];
+  const filters = [['all', 'Все'], ['in', 'Взносы'], ['out', 'Расходы']];
   const entries = d.entries.filter((e) => filter === 'all' || e.kind === filter);
   const entryRow = (e) => {
     const title = e.note || e.category || KIND[e.kind];
@@ -732,7 +744,7 @@ async function viewAdd(id, presetKind) {
   const d = state.cache[id] || (await api('GET', `/api/objects/${id}`));
   if (!d.me.canAdd) { toast('Ваша роль не позволяет добавлять операции'); return go(`#/o/${id}`); }
   const foreman = d.me.role === 'foreman';
-  const kinds = foreman ? [['out', 'Расход · факт'], ['plan', 'План']] : [['in', 'Взнос'], ['out', 'Расход · факт'], ['plan', 'План']];
+  const kinds = foreman ? [['out', 'Расход']] : [['in', 'Взнос'], ['out', 'Расход']];
   const isPay = presetKind === 'pay' && !foreman;
   const s = {
     kind: isPay ? 'out' : presetKind && kinds.some((k) => k[0] === presetKind) ? presetKind : 'out',
@@ -750,7 +762,7 @@ async function viewAdd(id, presetKind) {
     app.innerHTML = `
       <div class="screen no-tab">
         <div class="topbar">${backBtn(`#/o/${id}`, 'Закрыть')}<div class="title"><b>Новая операция</b><small>${esc(d.object.name)}</small></div><div class="spacer44"></div></div>
-        <div class="seg" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr));margin-top:20px">${kinds.map(([k, l]) => `<button data-k="${k}" class="${k === s.kind ? 'on' : ''}">${l}</button>`).join('')}</div>
+        ${kinds.length > 1 ? `<div class="seg" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr));margin-top:20px">${kinds.map(([k, l]) => `<button data-k="${k}" class="${k === s.kind ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
         <div style="text-align:center;margin-top:22px">
           <label for="amt" class="muted" style="font-size:13px">${isPlan ? 'Ориентировочная сумма, €' : isOut ? 'Фактическая сумма расхода, €' : 'Сумма взноса, €'}</label>
           <input id="amt" class="amount-input" inputmode="decimal" placeholder="0" value="${esc(amountVal)}" autocomplete="off">
@@ -910,7 +922,7 @@ async function viewForecast(id) {
   app.innerHTML = `
     <div class="screen no-tab">
       <div class="topbar">${backBtn(`#/o/${id}`)}<div class="title"><b>Прогноз продажи</b><small>${esc(o.name)}</small></div>
-        ${me.canAdd ? `<a class="icon-btn" href="#/o/${id}/add/plan" aria-label="Добавить плановый расход">${I.plus}</a>` : '<div class="spacer44"></div>'}</div>
+        <div class="spacer44"></div></div>
       <div class="card" style="margin-top:20px">
         <div class="muted" style="font-size:12px;display:flex;justify-content:space-between"><span>Ориентировочная цена продажи</span>${o.area && o.sale_price ? `<span>${fmt(o.sale_price / o.area)} € / м²</span>` : ''}</div>
         ${me.isCreator ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
@@ -929,7 +941,7 @@ async function viewForecast(id) {
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--gold);display:inline-block"></i>Факт</span>
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--line2);display:inline-block"></i>План</span>
         <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:4px;border-radius:2px;background:var(--red);display:inline-block"></i>Перерасход</span></div>
-      ${rows ? `<div class="rows">${rows}</div>` : '<div class="empty">Добавьте плановые и фактические расходы — здесь появится сравнение.</div>'}
+      ${rows ? `<div class="rows">${rows}</div>` : '<div class="empty">Укажите в объекте стоимость покупки и примерную стоимость ремонта, затем добавляйте расходы — здесь появится сравнение плана и факта.</div>'}
       <div class="muted" style="font-size:12px;line-height:1.5;margin-top:16px">Прогноз затрат: по каждой статье берётся план, а если факт уже больше — факт. Итого ≈ ${money(c.forecastCosts)}.</div>
     </div>`;
   const save = app.querySelector('#saveSale');
