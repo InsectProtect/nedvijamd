@@ -22,11 +22,13 @@ function client() {
 
 const sfx = Date.now();
 const A = client(), D = client(), I = client(), B = client();
-let r = await A('POST', '/api/register', { email: `artem${sfx}@t.md`, name: 'Артём', password: 'secret1' });
+let r = await A('POST', '/api/register', { email: `artem${sfx}@t.md`, first_name: 'Артём', last_name: 'Попов', password: 'secret1' });
 ok(r.status === 200, 'register Артём');
-await D('POST', '/api/register', { email: `den${sfx}@t.md`, name: 'Денис', password: 'secret1' });
-await I('POST', '/api/register', { email: `igor${sfx}@t.md`, name: 'Игорь', password: 'secret1' });
-await B('POST', '/api/register', { email: `buh${sfx}@t.md`, name: 'Бухгалтер', password: 'secret1' });
+r = await client()('POST', '/api/register', { email: `solo${sfx}@t.md`, first_name: 'Один', last_name: '', password: 'secret1' });
+ok(r.status === 400, 'surname required');
+await D('POST', '/api/register', { email: `den${sfx}@t.md`, first_name: 'Денис', last_name: 'Руссу', password: 'secret1' });
+await I('POST', '/api/register', { email: `igor${sfx}@t.md`, first_name: 'Игорь', last_name: 'Чебан', password: 'secret1' });
+await B('POST', '/api/register', { email: `buh${sfx}@t.md`, first_name: 'Мария', last_name: 'Бухгалтер', password: 'secret1' });
 r = await A('POST', '/api/login', { email: `artem${sfx}@t.md`, password: 'wrong' });
 ok(r.status === 401, 'wrong password rejected');
 
@@ -46,7 +48,7 @@ ok(r.status === 403, 'non-creator cannot invite');
 
 // доли
 let det = await A('GET', `/api/objects/${oid}`);
-const ids = Object.fromEntries(det.data.members.map((m) => [m.name, m.user_id]));
+const ids = Object.fromEntries(det.data.members.map((m) => [m.name.split(' ')[0], m.user_id]));
 r = await D('PUT', `/api/objects/${oid}/shares`, { members: [] });
 ok(r.status === 403, 'only creator sets shares');
 r = await A('PUT', `/api/objects/${oid}/shares`, { members: [
@@ -86,9 +88,9 @@ ok(det.data.entries.find((e) => e.id === fEntry).category === 'Ремонт', 'f
 // forecast costs = Покупка 68000 + Ремонт max(14000,1240) + Нотариус max(1800,1900) = 83900
 ok(c.forecastCosts === 83900, 'forecast costs uses max(plan,fact)');
 ok(c.profit === 21100, 'profit');
-const igor = det.data.members.find((m) => m.name === 'Игорь');
+const igor = det.data.members.find((m) => m.name.startsWith('Игорь'));
 ok(igor.payout === 2110, 'foreman 10%');
-ok(det.data.members.find((m) => m.name === 'Артём').payout === 9495, 'investor half of rest');
+ok(det.data.members.find((m) => m.name.startsWith('Артём')).payout === 9495, 'investor half of rest');
 ok(c.poolBalance === 12100, 'pool balance');
 ok(c.settlement.length > 0, 'settlement computed: ' + JSON.stringify(c.settlement));
 
@@ -104,6 +106,18 @@ ok(r.status === 401, 'receipt hidden from anonymous');
 // список
 r = await A('GET', '/api/objects');
 ok(r.data.objects.length === 1 && r.data.totals.invested === 44000 && r.data.totals.profit === 9495, 'home totals: ' + JSON.stringify(r.data.totals));
+
+// договор
+r = await D('GET', `/api/objects/${oid}/contract`);
+ok(r.status === 200 && r.data.html.includes('ACORD DE INVESTIȚIE COMUNĂ') && r.data.html.includes('Денис Руссу') && r.data.html.includes('Diriginte de șantier'), 'contract generated with names');
+r = await B('GET', `/api/objects/${oid}/contract`);
+ok(r.status === 200, 'viewer can see contract');
+r = await A('POST', `/api/objects/${oid}/contract-link`);
+const cl = await fetch(BASE + '/c/' + r.data.url.split('/c/')[1]);
+const ch = await cl.text();
+ok(cl.status === 200 && ch.includes('window.print()'), 'printable contract link works without session');
+r = await A('PATCH', '/api/me', { lang: 'ro' });
+ok(r.data.user.lang === 'ro', 'language saved');
 
 // удаление операции с согласия всех
 r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 300, note: 'Ошибка' });

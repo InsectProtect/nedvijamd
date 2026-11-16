@@ -105,3 +105,13 @@ CREATE TABLE IF NOT EXISTS entry_delete_votes (
 
 -- Ориентировочная стоимость ремонта
 ALTER TABLE objects ADD COLUMN IF NOT EXISTS repair_budget NUMERIC;
+
+-- Язык интерфейса
+ALTER TABLE users ADD COLUMN IF NOT EXISTS lang TEXT NOT NULL DEFAULT 'ru';
+
+-- Ссылки на договор для открытия в браузере (печать / PDF)
+CREATE TABLE IF NOT EXISTS contract_links (
+  token TEXT PRIMARY KEY,
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL
+);

@@ -34,12 +34,12 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const sfx = Date.now() % 100000;
 const startMsg = (id, text) => ({ update_id: 1, message: { message_id: 1, chat: { id, type: 'private' }, from: { id, first_name: 'X' }, text } });
 
-await wait(1500);
+await wait(4000);
 ok(calls.some((c) => c.method === 'setWebhook' && c.body.url === 'http://localhost:3999/tg/webhook'), 'webhook registered on startup');
 ok(calls.some((c) => c.method === 'setChatMenuButton'), 'menu button set');
 
 let r = await req('POST', '/api/tg-login', { initData: initData({ id: 9000 + sfx, first_name: 'Артём', username: 'artem' }) });
-ok(r.status === 200 && r.data.user.name === 'Артём', 'tg-login creates account');
+ok(r.status === 200 && r.data.user.name === 'Артём' && r.data.user.needs_name === true, 'tg-login creates account, asks for surname');
 const sA = r.data.token;
 r = await req('POST', '/api/tg-login', { initData: initData({ id: 9000 + sfx, first_name: 'Артём' }).replace(/hash=\w+/, 'hash=' + '0'.repeat(64)) });
 ok(r.status === 401, 'forged initData rejected');
@@ -77,7 +77,7 @@ ok(exp && String(exp.body.chat_id) === String(9000 + sfx) && /1 240/.test(exp.b
 ok(!calls.slice(b2).some((c) => c.method === 'sendMessage' && String(c.body.chat_id) === String(9100 + sfx)), 'author not notified about own expense');
 
 // привязка email-аккаунта
-r = await req('POST', '/api/register', { email: `e${sfx}@t.md`, name: 'Почта', password: 'secret1' });
+r = await req('POST', '/api/register', { email: `e${sfx}@t.md`, first_name: 'Почта', last_name: 'Тест', password: 'secret1' });
 const sE = r.data.token;
 r = await req('POST', '/api/tg-link', null, sE);
 ok(/start=link_/.test(r.data.url), 'link url');

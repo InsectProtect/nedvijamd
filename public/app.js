@@ -33,7 +33,7 @@ const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000
 const dateRu = (d) => {
   if (!d) return '';
   const [y, m, dd] = d.split('-');
-  const mon = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'][Number(m) - 1];
+  const mon = I18N.months()[Number(m) - 1];
   return `${Number(dd)} ${mon}${y !== String(new Date().getFullYear()) ? ' ' + y : ''}`;
 };
 
@@ -57,7 +57,22 @@ const I = {
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M7 8l5-5 5 5"/></svg>'
 };
 
+const ask = (m) => confirm(I18N.tr(m));
+const langSwitch = () => `<div class="seg lang-seg" style="grid-template-columns:1fr 1fr" role="group" aria-label="Язык">
+  <button type="button" data-lang="ru" class="${I18N.lang === 'ru' ? 'on' : ''}" data-nt>Русский</button>
+  <button type="button" data-lang="ro" class="${I18N.lang === 'ro' ? 'on' : ''}" data-nt>Română</button></div>`;
+function bindLang() {
+  app.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', async () => {
+    const l = b.dataset.lang;
+    if (l === I18N.lang) return;
+    if (state.me) { try { await api('PATCH', '/api/me', { lang: l }); } catch { /* не критично */ } }
+    I18N.set(l);
+    location.reload();
+  }));
+}
+
 function toast(msg, good = false) {
+  msg = I18N.tr(msg);
   const t = document.createElement('div');
   t.className = 'toast' + (good ? ' okay' : '');
   t.setAttribute('role', 'status');
@@ -172,11 +187,12 @@ function viewAuth(mode) {
   const inviteNote = sessionStorage.getItem('invite') ? '<div class="card gold" style="margin-top:20px;font-size:14px">Вас пригласили в объект. Войдите или зарегистрируйтесь, чтобы присоединиться.</div>' : '';
   app.innerHTML = `
     <div class="auth-wrap">
+      <div style="max-width:220px;margin-bottom:28px">${langSwitch()}</div>
       <div class="auth-logo">Доля</div>
       <div class="lead">Учёт совместных вложений в недвижимость: кто сколько вложил, на что потратил и сколько заработает.</div>
       ${inviteNote}
       <form id="f" style="margin-top:28px" novalidate>
-        ${reg ? '<label class="label" for="name">Имя</label><input class="field" id="name" autocomplete="name" required>' : ''}
+        ${reg ? '<label class="label" for="fname">Имя</label><input class="field" id="fname" autocomplete="given-name" required><label class="label" for="lname">Фамилия</label><input class="field" id="lname" autocomplete="family-name" required>' : ''}
         <label class="label" for="email">Email</label>
         <input class="field" id="email" type="email" autocomplete="email" inputmode="email" required>
         <label class="label" for="pw">Пароль</label>
@@ -186,12 +202,13 @@ function viewAuth(mode) {
       </form>
       <a href="${reg ? '#/login' : '#/register'}" style="text-align:center;margin-top:18px;font-size:14px">${reg ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}</a>
     </div>`;
+  bindLang();
   app.querySelector('#f').onsubmit = async (e) => {
     e.preventDefault();
     const err = app.querySelector('#err');
     err.textContent = '';
     const body = { email: app.querySelector('#email').value, password: app.querySelector('#pw').value };
-    if (reg) body.name = app.querySelector('#name').value;
+    if (reg) { body.first_name = app.querySelector('#fname').value; body.last_name = app.querySelector('#lname').value; body.lang = I18N.lang; }
     try {
       const d = await api('POST', reg ? '/api/register' : '/api/login', body);
       state.me = d.user;
@@ -199,7 +216,7 @@ function viewAuth(mode) {
       const inv = sessionStorage.getItem('invite');
       go(inv ? `#/join/${inv}` : '#/');
     } catch (ex) {
-      err.textContent = ex.message;
+      err.textContent = I18N.tr(ex.message);
     }
   };
 }
@@ -288,12 +305,63 @@ function plural(n, one, few, many) {
   return many;
 }
 
+function viewName() {
+  const parts = String(state.me.name || '').trim().split(/\s+/);
+  const first = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1] : '';
+  const forced = state.me.needs_name;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${forced ? '<div class="spacer44"></div>' : backBtn('#/profile')}<div class="spacer44"></div></div>
+      <h1 class="h" style="margin-top:18px">Как вас зовут</h1>
+      <div class="lead">Укажите имя и фамилию — они нужны для договора и видны партнёрам.</div>
+      <form id="f" novalidate>
+        <label class="label" for="fname">Имя</label><input class="field" id="fname" autocomplete="given-name" value="${esc(first)}">
+        <label class="label" for="lname">Фамилия</label><input class="field" id="lname" autocomplete="family-name" value="${esc(last)}">
+        <div class="err" id="err" role="alert"></div>
+        <button class="btn" style="margin-top:12px">${forced ? 'Продолжить' : 'Сохранить'}</button>
+      </form>
+    </div>`;
+  app.querySelector('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const d = await api('PATCH', '/api/me', { first_name: app.querySelector('#fname').value, last_name: app.querySelector('#lname').value });
+      Object.assign(state.me, d.user);
+      const inv = sessionStorage.getItem('invite');
+      go(inv ? `#/join/${inv}` : forced ? '#/' : '#/profile');
+    } catch (ex) { app.querySelector('#err').textContent = I18N.tr(ex.message); }
+  };
+}
+
+async function viewContract(id) {
+  const d = await api('GET', `/api/objects/${id}/contract`);
+  app.innerHTML = `
+    <div class="screen no-tab" style="padding-left:0;padding-right:0">
+      <div class="topbar" style="padding:0 20px">${backBtn(`#/o/${id}`)}<div class="title"><b>Договор дольщиков</b><small>Română</small></div><div class="spacer44"></div></div>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin:14px 20px 0">Договор формируется на румынском языке по данным объекта. Это шаблон: перед подписанием покажите его юристу или нотариусу.</div>
+      <div style="padding:12px 20px 0"><button class="btn" id="print">Распечатать / PDF</button></div>
+      <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:75vh;border:0;margin-top:14px;background:#E9E7E1"></iframe>
+    </div>`;
+  const frame = app.querySelector('#doc');
+  frame.srcdoc = d.html;
+  app.querySelector('#print').onclick = async () => {
+    if (TG) {
+      try { const r = await api('POST', `/api/objects/${id}/contract-link`); openExternal(r.url); } catch (ex) { toast(ex.message); }
+    } else {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { window.print(); }
+    }
+  };
+}
+
 function viewProfile() {
   app.innerHTML = `
     <div class="screen">
       <div class="topbar">${backBtn('#/')}<div class="spacer44"></div></div>
       <div style="display:flex;align-items:center;gap:14px;margin-top:20px">${avatar(state.me.id, state.me.name, 'lg')}
-        <div><div style="font-size:17px;font-weight:600">${esc(state.me.name)}</div><div class="muted" style="font-size:13px">${esc(state.me.email || (state.me.tg_username ? '@' + state.me.tg_username : 'вход через Telegram'))}</div></div></div>
+        <div style="flex:1"><div style="font-size:17px;font-weight:600">${esc(state.me.name)}</div><div class="muted" style="font-size:13px">${esc(state.me.email || (state.me.tg_username ? '@' + state.me.tg_username : 'вход через Telegram'))}</div></div></div>
+      <a class="pill" href="#/name" style="margin-top:14px">Изменить имя</a>
+      <div class="label">Язык</div>
+      ${langSwitch()}
       <div class="card" style="margin-top:24px;font-size:14px;line-height:1.55;color:#B5B5BA">
         Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.
       </div>
@@ -306,6 +374,7 @@ function viewProfile() {
       ${TG ? '' : '<button class="btn ghost" id="out" style="margin-top:24px">Выйти</button>'}
     </div>
     ${tabbar('profile', null)}`;
+  bindLang();
   const out = app.querySelector('#out');
   if (out) out.onclick = async () => {
     await api('POST', '/api/logout');
@@ -437,6 +506,7 @@ async function viewObject(id, filter = 'all') {
       <div class="topbar">${backBtn('#/')}
         <div style="display:flex;gap:8px">
           ${me.isCreator ? `<a class="icon-btn" href="#/o/${id}/edit" aria-label="Редактировать объект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></a>` : ''}
+          <a class="icon-btn" href="#/o/${id}/contract" aria-label="Договор дольщиков"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></a>
           <a class="icon-btn" href="#/o/${id}/delete" aria-label="Удаление и выгрузка">${I.more}</a>
         </div>
       </div>
@@ -658,12 +728,12 @@ async function viewEntry(eid) {
     if (r.deleted) { toast('Операция удалена', true); go(`#/o/${e.object_id}`); } else viewEntry(eid);
   };
   if (del) del.onclick = async () => {
-    if (!confirm('Отправить участникам запрос на удаление? Операция удалится вместе с чеками, когда согласятся все.')) return;
+    if (!ask('Отправить участникам запрос на удаление? Операция удалится вместе с чеками, когда согласятся все.')) return;
     try { const r = await api('DELETE', `/api/entries/${eid}`); if (!r.deleted) toast('Запрос отправлен участникам', true); after(r); } catch (ex) { toast(ex.message); }
   };
   const vyes = app.querySelector('#vyes');
   if (vyes) vyes.onclick = async () => {
-    if (!confirm('Согласны удалить эту операцию?')) return;
+    if (!ask('Согласны удалить эту операцию?')) return;
     try { after(await api('POST', `/api/entries/${eid}/delete-vote`, { agree: true })); } catch (ex) { toast(ex.message); }
   };
   const vno = app.querySelector('#vno');
@@ -760,7 +830,7 @@ async function viewMembers(id) {
     try { await api('PATCH', `/api/objects/${id}/members/${e.target.dataset.role}`, { role: e.target.value }); toast('Роль изменена. Проверьте доли.', true); delete state.cache[id]; } catch (ex) { toast(ex.message); viewMembers(id); }
   });
   on('[data-rm]', 'click', async (e) => {
-    if (!confirm('Убрать участника из объекта?')) return;
+    if (!ask('Убрать участника из объекта?')) return;
     try { await api('DELETE', `/api/objects/${id}/members/${e.currentTarget.dataset.rm}`); delete state.cache[id]; viewMembers(id); } catch (ex) { toast(ex.message); }
   });
   const mk = app.querySelector('#mk');
@@ -776,7 +846,7 @@ async function viewMembers(id) {
         <div class="muted" style="font-size:12px;margin-top:8px">Ссылка действует 7 дней, роль: ${ROLE[r.role]}.${r.tg_url ? ' Откроется в Telegram-боте.' : ''}</div>`;
       const tgs = app.querySelector('#tgs');
       if (tgs) tgs.onclick = () => openExternal(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
-      app.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована', true); } catch { prompt('Скопируйте ссылку', url); } };
+      app.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована', true); } catch { prompt(I18N.tr('Скопируйте ссылку'), url); } };
       const sh = app.querySelector('#sh');
       if (sh) sh.onclick = () => navigator.share({ title: 'Доля', text, url }).catch(() => {});
     } catch (ex) { toast(ex.message); }
@@ -895,9 +965,9 @@ async function viewDelete(id) {
     if (r.deleted) { toast('Объект удалён', true); go('#/'); } else viewDelete(id);
   };
   const req = app.querySelector('#req');
-  if (req) req.onclick = async () => { if (confirm('Отправить участникам запрос на удаление объекта?')) try { done(await api('POST', `/api/objects/${id}/delete-request`)); } catch (ex) { toast(ex.message); } };
+  if (req) req.onclick = async () => { if (ask('Отправить участникам запрос на удаление объекта?')) try { done(await api('POST', `/api/objects/${id}/delete-request`)); } catch (ex) { toast(ex.message); } };
   const yes = app.querySelector('#yes');
-  if (yes) yes.onclick = async () => { if (confirm('Подтверждаете удаление объекта?')) try { done(await api('POST', `/api/objects/${id}/delete-vote`, { agree: true })); } catch (ex) { toast(ex.message); } };
+  if (yes) yes.onclick = async () => { if (ask('Подтверждаете удаление объекта?')) try { done(await api('POST', `/api/objects/${id}/delete-vote`, { agree: true })); } catch (ex) { toast(ex.message); } };
   const no = app.querySelector('#no');
   if (no) no.onclick = async () => { try { await api('POST', `/api/objects/${id}/delete-vote`, { agree: false }); toast('Запрос на удаление отклонён', true); viewDelete(id); } catch (ex) { toast(ex.message); } };
   const cancel = app.querySelector('#cancel');
@@ -910,6 +980,8 @@ const routes = [
   [/^#\/register$/, () => viewAuth('register'), true],
   [/^#\/join\/([\w-]+)$/, (m) => viewJoin(m[1]), true],
   [/^#\/profile$/, () => viewProfile()],
+  [/^#\/name$/, () => viewName()],
+  [/^#\/o\/(\d+)\/contract$/, (m) => viewContract(m[1])],
   [/^#\/new$/, () => viewObjectForm(null)],
   [/^#\/o\/(\d+)$/, (m) => viewObject(m[1])],
   [/^#\/o\/(\d+)\/edit$/, (m) => viewObjectForm(m[1])],
@@ -929,6 +1001,7 @@ async function render() {
     const m = hash.match(re);
     if (!m) continue;
     if (!isPublic && !state.me) return go('#/login');
+    if (state.me && state.me.needs_name && hash !== '#/name') return go('#/name');
     try {
       await fn(m);
       window.scrollTo(0, 0);
@@ -980,6 +1053,12 @@ function setupTelegram() {
       state.bot = j.bot;
     }
   } catch { /* офлайн */ }
+  if (state.me && state.me.lang) {
+    let explicit = '';
+    try { explicit = localStorage.getItem('dolya_lang') || ''; } catch { /* нет доступа */ }
+    if (!explicit && state.me.lang !== I18N.lang) { I18N.set(state.me.lang); location.reload(); return; }
+    if (explicit && explicit !== state.me.lang) api('PATCH', '/api/me', { lang: explicit }).catch(() => {});
+  }
   window.addEventListener('hashchange', render);
   if (startParam.startsWith('join_')) return go(`#/join/${startParam.slice(5)}`);
   if (TG) {

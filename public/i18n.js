@@ -1,0 +1,463 @@
+'use strict';
+/* Перевод интерфейса RU → RO. Шаблоны пишутся по-русски; в румынском режиме
+   текст и подсказки переводятся по словарю фраз (длинные фразы — первыми). */
+(function () {
+  const RO = {
+    // общие
+    'Доля': 'Dolya',
+    'Доля — учёт совместных вложений': 'Dolya — evidența investițiilor comune',
+    'Учёт совместных вложений в недвижимость: кто сколько вложил, на что потратил и сколько заработает.': 'Evidența investițiilor comune în imobiliare: cine cât a investit, pe ce s-a cheltuit și cât se va câștiga.',
+    'Загрузка…': 'Se încarcă…',
+    'Назад': 'Înapoi',
+    'Закрыть': 'Închide',
+    'Навигация': 'Navigare',
+    'Объекты': 'Obiecte',
+    'Профиль': 'Profil',
+    'Добавить': 'Adaugă',
+    'Сохранить': 'Salvează',
+    'Сохраняю…': 'Se salvează…',
+    'Сохранено': 'Salvat',
+    'Ошибка': 'Eroare',
+    'Да': 'Da',
+    'Против': 'Împotrivă',
+    'На главную': 'Acasă',
+    'Не сейчас': 'Nu acum',
+    'вы': 'dvs.',
+    '(вы)': '(dvs.)',
+    '· вы': '· dvs.',
+    'Язык': 'Limba',
+    'Русский': 'Русский',
+    'Română': 'Română',
+
+    // вход
+    'Имя': 'Prenume',
+    'Фамилия': 'Nume',
+    'Email': 'Email',
+    'Пароль': 'Parolă',
+    'Войти': 'Intră',
+    'Создать аккаунт': 'Creează cont',
+    'Уже есть аккаунт? Войти': 'Aveți deja cont? Intrați',
+    'Нет аккаунта? Зарегистрироваться': 'Nu aveți cont? Înregistrați-vă',
+    'Зарегистрироваться': 'Înregistrare',
+    'У меня есть аккаунт': 'Am deja cont',
+    'Вас пригласили в объект. Войдите или зарегистрируйтесь, чтобы присоединиться.': 'Ați fost invitat într-un obiect. Intrați sau înregistrați-vă pentru a vă alătura.',
+    'приглашает вас в объект': 'vă invită în obiectul',
+    'с ролью': 'cu rolul',
+    'Присоединиться': 'Alăturați-vă',
+    'Вы присоединились к объекту': 'V-ați alăturat obiectului',
+    'Как вас зовут': 'Cum vă numiți',
+    'Укажите имя и фамилию — они нужны для договора и видны партнёрам.': 'Indicați prenumele și numele — sunt necesare pentru contract și sunt vizibile partenerilor.',
+    'Продолжить': 'Continuă',
+
+    // главная
+    'Мои вложения': 'Investițiile mele',
+    'Моя прибыль': 'Profitul meu',
+    'объект': 'obiect',
+    'объекта': 'obiecte',
+    'объектов': 'obiecte',
+    'партнёр': 'partener',
+    'партнёра': 'parteneri',
+    'партнёров': 'parteneri',
+    'Объект': 'Obiect',
+    'Пока нет объектов.': 'Încă nu aveți obiecte.',
+    'Создайте первый и пригласите партнёров по ссылке.': 'Creați primul și invitați partenerii prin link.',
+    'Создать объект': 'Creează obiect',
+    'моя доля': 'cota mea',
+    'нет прогноза': 'fără prognoză',
+    'Рассрочка: осталось': 'Rate: rămas',
+    'удаление': 'ștergere',
+
+    // профиль
+    'Выйти': 'Ieșire',
+    'Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.': 'Vedeți toate operațiunile din obiectele dvs., dar le introduceți doar pe ale dvs. Cotele le stabilește creatorul obiectului, iar obiectul poate fi șters doar cu acordul tuturor participanților.',
+    'Совет: добавьте «Долю» на экран телефона. На iPhone — «Поделиться» → «На экран Домой», на Android — меню браузера → «Установить приложение».': 'Sfat: adăugați «Dolya» pe ecranul telefonului. Pe iPhone — «Partajare» → «Adaugă pe ecranul principal», pe Android — meniul browserului → «Instalează aplicația».',
+    'Telegram подключён': 'Telegram conectat',
+    'Уведомления приходят в бот.': 'Notificările vin în bot.',
+    'Подключите Telegram, чтобы получать уведомления о расходах, долях и удалении и входить в Долю прямо из бота.': 'Conectați Telegram pentru a primi notificări despre cheltuieli, cote și ștergeri și pentru a intra în Dolya direct din bot.',
+    'Подключить Telegram': 'Conectează Telegram',
+    'вход через Telegram': 'autentificare prin Telegram',
+    'Изменить имя': 'Modifică numele',
+
+    // форма объекта
+    'Новый объект': 'Obiect nou',
+    'Добавить фото объекта': 'Adaugă foto obiectului',
+    'Заменить фото': 'Înlocuiește foto',
+    'Убрать фото': 'Elimină foto',
+    'Фото объекта': 'Foto obiectului',
+    'Название': 'Denumire',
+    'Например: Ботаника, 2 комн.': 'De exemplu: Botanica, 2 camere',
+    'Площадь, м²': 'Suprafața, m²',
+    'м²': 'm²',
+    'Стоимость покупки, €': 'Prețul de cumpărare, €',
+    'Цена квартиры по договору': 'Prețul apartamentului conform contractului',
+    'Как покупаем': 'Cum cumpărăm',
+    'Сразу': 'Integral',
+    'В рассрочку': 'În rate',
+    'Ежемесячный платёж, €': 'Rata lunară, €',
+    'Необязательно — для расчёта, сколько платежей осталось': 'Opțional — pentru a calcula câte rate au rămas',
+    '«Стоимость покупки» — полная сумма по договору рассрочки. Каждый платёж вносите как расход в категории «Покупка» — приложение покажет, сколько выплачено и сколько осталось.': '«Prețul de cumpărare» — suma totală conform contractului în rate. Introduceți fiecare rată ca cheltuială în categoria «Cumpărare» — aplicația va arăta cât s-a achitat și cât a rămas.',
+    'Ориентировочная стоимость ремонта, €': 'Costul estimativ al reparației, €',
+    'Если ремонт планируется': 'Dacă se planifică reparație',
+    'Статус': 'Statut',
+    'Ориентировочная цена продажи, €': 'Prețul estimativ de vânzare, €',
+    'Можно указать позже': 'Se poate indica mai târziu',
+    'Вы станете создателем: будете ставить доли, приглашать участников и управлять удалением.': 'Veți fi creatorul: veți stabili cotele, veți invita participanți și veți gestiona ștergerea.',
+    'Редактировать может только создатель': 'Doar creatorul poate edita',
+    'покупка': 'cumpărare',
+    'ремонт': 'reparație',
+    'сдаётся': 'în chirie',
+    'продаётся': 'de vânzare',
+    'продана': 'vândut',
+
+    // карточка объекта
+    'куплена за': 'cumpărat cu',
+    'в рассрочку за': 'în rate pentru',
+    'Редактировать объект': 'Editează obiectul',
+    'Удаление и выгрузка': 'Ștergere și export',
+    'Создатель запросил удаление объекта.': 'Creatorul a cerut ștergerea obiectului.',
+    'Нужен ваш ответ →': 'Este necesar răspunsul dvs. →',
+    'Идёт голосование →': 'Votarea este în curs →',
+    'Операция ждёт': 'O operațiune așteaptă',
+    'операция ждёт': 'operațiune așteaptă',
+    'операции ждут': 'operațiuni așteaptă',
+    'операций ждут': 'operațiuni așteaptă',
+    'вашего согласия на удаление →': 'acordul dvs. pentru ștergere →',
+    'Рассрочка': 'Rate',
+    'Выплачено': 'Achitat',
+    'Осталось': 'Rămas',
+    'Всего': 'Total',
+    'Укажите стоимость покупки в настройках объекта': 'Indicați prețul de cumpărare în setările obiectului',
+    'платёж': 'rată',
+    'платежа': 'rate',
+    'платежей': 'rate',
+    'по': 'a câte',
+    'Рассрочка полностью выплачена': 'Ratele sunt achitate integral',
+    'Внести платёж': 'Achită o rată',
+    'Ремонт': 'Reparație',
+    'без оценки': 'fără estimare',
+    'Потрачено': 'Cheltuit',
+    'Перерасход': 'Depășire',
+    'Ориентир': 'Estimare',
+    'Вложено': 'Investit',
+    'Затраты · факт': 'Costuri · real',
+    'Затраты · план': 'Costuri · plan',
+    'В общем котле:': 'În fondul comun:',
+    'Прогноз продажи': 'Prognoza vânzării',
+    'Прибыль ≈': 'Profit ≈',
+    'План, факт и цена продажи': 'Plan, real și prețul de vânzare',
+    'План, факт и прибыль': 'Plan, real și profit',
+    'Участники': 'Participanți',
+    'Доли': 'Cote',
+    'Пригласить': 'Invită',
+    'Все': 'Toate',
+    'инвестор': 'investitor',
+    'прораб': 'diriginte de șantier',
+    'просмотр': 'vizualizare',
+    'создатель': 'creator',
+    '· создатель': '· creator',
+    'прибыли': 'din profit',
+    'без доли': 'fără cotă',
+    'Взаиморасчёт: чтобы вложения совпали с долями': 'Decontare: pentru ca investițiile să corespundă cotelor',
+    'Операции': 'Operațiuni',
+    'Взносы': 'Contribuții',
+    'Факт': 'Real',
+    'План': 'Plan',
+    'Операций пока нет.': 'Încă nu sunt operațiuni.',
+    'Нет операций этого типа.': 'Nu sunt operațiuni de acest tip.',
+    'Добавьте взнос, расход или плановую сумму.': 'Adăugați o contribuție, o cheltuială sau o sumă planificată.',
+    'план': 'plan',
+    'взнос': 'contribuție',
+    'из общих': 'din fondul comun',
+    'из своих': 'din banii proprii',
+    'удаление · нужен ваш ответ': 'ștergere · necesită răspunsul dvs.',
+    'на удалении': 'în curs de ștergere',
+    'Договор дольщиков': 'Contractul coinvestitorilor',
+    'Договор (RO)': 'Contract (RO)',
+
+    // операция
+    'Новая операция': 'Operațiune nouă',
+    'Взнос': 'Contribuție',
+    'Расход · факт': 'Cheltuială · reală',
+    'Расход': 'Cheltuială',
+    'Ориентировочная сумма, €': 'Suma estimativă, €',
+    'Фактическая сумма расхода, €': 'Suma reală a cheltuielii, €',
+    'Сумма взноса, €': 'Suma contribuției, €',
+    'Ориентировочный расход попадёт в план и в прогноз прибыли. Когда оплатите — добавьте фактический расход с чеком, план и факт сравнятся автоматически.': 'Cheltuiala estimativă intră în plan și în prognoza profitului. Când achitați — adăugați cheltuiala reală cu bon, planul și realul se vor compara automat.',
+    'Кто внёс': 'Cine a depus',
+    'Кто оплатил': 'Cine a achitat',
+    'Только свои операции, за партнёра нельзя': 'Doar operațiunile proprii, nu în locul partenerului',
+    'Нельзя изменить': 'Nu se poate modifica',
+    'Из чьих денег': 'Din ce bani',
+    'Из своих': 'Din banii proprii',
+    'Из общих': 'Din fondul comun',
+    'Сумма засчитается как ваше вложение.': 'Suma se va considera investiția dvs.',
+    'Сумма спишется из общего котла (взносов).': 'Suma se va scădea din fondul comun (contribuții).',
+    'Категория': 'Categorie',
+    'Категория · прораб вносит только ремонт': 'Categorie · dirigintele introduce doar reparația',
+    'Комментарий': 'Comentariu',
+    'Например: перевод на общий счёт': 'De exemplu: transfer în contul comun',
+    'Например: плитка, санузел': 'De exemplu: faianță, baie',
+    'Дата': 'Data',
+    'Чеки и документы': 'Bonuri și documente',
+    'фото': 'foto',
+    'Камера': 'Cameră',
+    'Галерея': 'Galerie',
+    'Сфотографировать чек': 'Fotografiază bonul',
+    'Загрузить фото из галереи': 'Încarcă foto din galerie',
+    'Загрузить фото': 'Încarcă foto',
+    'Платёж по рассрочке': 'Rată pentru cumpărare',
+    'Ваша роль не позволяет добавлять операции': 'Rolul dvs. nu permite adăugarea operațiunilor',
+    'Не удалось прочитать фото': 'Nu s-a putut citi fotografia',
+    'Покупка': 'Cumpărare',
+    'Мебель и техника': 'Mobilă și tehnică',
+    'Нотариус и регистрация': 'Notar și înregistrare',
+    'Налоги': 'Impozite',
+    'Риелтор': 'Agent imobiliar',
+    'Содержание': 'Întreținere',
+    'Прочее': 'Altele',
+
+    // карточка операции
+    'внёс': 'a depus',
+    'оплатил': 'a achitat',
+    'запланировал': 'a planificat',
+    'Чеки': 'Bonuri',
+    'Чеков нет': 'Nu sunt bonuri',
+    'Открыть чек': 'Deschide bonul',
+    'Удалить операцию': 'Șterge operațiunea',
+    'Удалится после согласия всех участников сделки': 'Se va șterge după acordul tuturor participanților',
+    'Изменить или удалить операцию может только её автор — с согласия всех участников': 'Operațiunea poate fi modificată sau ștearsă doar de autor — cu acordul tuturor participanților',
+    'Запрошено удаление': 'Ștergere cerută',
+    'автор': 'autor',
+    'ждём ответа': 'așteptăm răspuns',
+    'Операция удалится, когда согласятся все участники сделки. Пока она учитывается в расчётах. Любой отказ отменяет запрос.': 'Operațiunea se va șterge când vor fi de acord toți participanții. Până atunci este inclusă în calcule. Orice refuz anulează cererea.',
+    'Согласен удалить': 'Sunt de acord',
+    'Отозвать запрос': 'Retrage cererea',
+    'Отправить участникам запрос на удаление? Операция удалится вместе с чеками, когда согласятся все.': 'Trimiteți participanților cererea de ștergere? Operațiunea se va șterge împreună cu bonurile când vor fi de acord toți.',
+    'Согласны удалить эту операцию?': 'Sunteți de acord să ștergeți această operațiune?',
+    'Запрос отправлен участникам': 'Cererea a fost trimisă participanților',
+    'Запрос отклонён, операция остаётся': 'Cererea a fost respinsă, operațiunea rămâne',
+    'Операция удалена': 'Operațiunea a fost ștearsă',
+    'Загружаю…': 'Se încarcă…',
+    'Чек': 'Bon',
+    'из': 'din',
+    'Просмотр чека': 'Vizualizare bon',
+    'Фото чека': 'Foto bon',
+    'Открыть отдельно': 'Deschide separat',
+    'Двойное касание — увеличить · свайп — следующий': 'Atingere dublă — mărire · glisare — următorul',
+
+    // прогноз
+    'Добавить плановый расход': 'Adaugă cheltuială planificată',
+    'Ориентировочная цена продажи': 'Prețul estimativ de vânzare',
+    'Например: 105000': 'De exemplu: 105000',
+    'создатель ещё не указал': 'creatorul nu a indicat încă',
+    'Ориентировочная прибыль': 'Profit estimativ',
+    'на затраты': 'la costuri',
+    'остатка': 'din rest',
+    'Доли инвесторов не равны 100 % — создатель должен их поправить.': 'Cotele investitorilor nu fac 100 % — creatorul trebuie să le corecteze.',
+    'Расходы': 'Cheltuieli',
+    'факт': 'real',
+    '/ план': '/ plan',
+    'сверх плана': 'peste plan',
+    'без плана': 'fără plan',
+    'Добавьте плановые и фактические расходы — здесь появится сравнение.': 'Adăugați cheltuieli planificate și reale — aici va apărea comparația.',
+    'Прогноз затрат: по каждой статье берётся план, а если факт уже больше — факт. Итого': 'Prognoza costurilor: pentru fiecare categorie se ia planul, iar dacă realul este deja mai mare — realul. Total',
+    'Цена сохранена': 'Prețul a fost salvat',
+
+    // участники
+    'Состав у каждого объекта свой. Все видят одни цифры, но вносят только свои операции. Прораб вносит расходы на ремонт, «Просмотр» только смотрит.': 'Fiecare obiect are componența sa. Toți văd aceleași cifre, dar introduc doar operațiunile proprii. Dirigintele introduce cheltuielile de reparație, «Vizualizare» doar privește.',
+    'Создатель · ставит доли и доступ': 'Creator · stabilește cotele și accesul',
+    'Создатель': 'Creator',
+    'через Telegram': 'prin Telegram',
+    'Пригласить по ссылке': 'Invită prin link',
+    'Роль приглашённого': 'Rolul invitatului',
+    'Инвестор — вкладывает деньги, получает долю': 'Investitor — investește bani, primește cotă',
+    'Прораб — ремонт, доля с прибыли': 'Diriginte — reparație, cotă din profit',
+    'Просмотр — только смотрит': 'Vizualizare — doar privește',
+    'Создать ссылку': 'Creează link',
+    'Отправить в Telegram': 'Trimite în Telegram',
+    'Скопировать': 'Copiază',
+    'Поделиться': 'Partajează',
+    'Ссылка действует 7 дней, роль:': 'Linkul este valabil 7 zile, rol:',
+    'Откроется в Telegram-боте.': 'Se va deschide în botul Telegram.',
+    'Ссылка скопирована': 'Linkul a fost copiat',
+    'Скопируйте ссылку': 'Copiați linkul',
+    'Приглашать участников и менять роли может только создатель объекта.': 'Doar creatorul obiectului poate invita participanți și schimba rolurile.',
+    'Инвестор': 'Investitor',
+    'Прораб': 'Diriginte de șantier',
+    'Просмотр': 'Vizualizare',
+    'Роль изменена. Проверьте доли.': 'Rolul a fost schimbat. Verificați cotele.',
+    'Убрать участника из объекта?': 'Eliminați participantul din obiect?',
+    'Приглашение в объект': 'Invitație în obiectul',
+    'в Доле': 'în Dolya',
+
+    // доли
+    'Доли ставите только вы как создатель объекта. Участники их видят, но изменить не могут.': 'Cotele le stabiliți doar dvs. ca creator al obiectului. Participanții le văd, dar nu le pot modifica.',
+    'Доли ставит создатель объекта —': 'Cotele le stabilește creatorul obiectului —',
+    'Вы их видите, но изменить не можете.': 'Le vedeți, dar nu le puteți modifica.',
+    'Инвесторы · делят прибыль после прораба': 'Investitori · împart profitul după diriginte',
+    ', прораб': ', diriginte',
+    '% прибыли': '% din profit',
+    'Сумма': 'Sumă',
+    'Без доли': 'Fără cotă',
+    'Доля от прибыли, %': 'Cota din profit, %',
+    'Фиксированная сумма, €': 'Sumă fixă, €',
+    'Прораб не получает долю с продажи.': 'Dirigintele nu primește cotă din vânzare.',
+    'Без доли с продажи.': 'Fără cotă din vânzare.',
+    'Прораба нет. Его можно пригласить на экране «Участники» с ролью «Прораб».': 'Nu există diriginte. Îl puteți invita în ecranul «Participanți» cu rolul «Diriginte de șantier».',
+    'При прогнозной прибыли': 'La profitul estimat de',
+    'Сохранить доли': 'Salvează cotele',
+    'Все участники увидят новые доли сразу': 'Toți participanții vor vedea imediat noile cote',
+    'Доли сохранены': 'Cotele au fost salvate',
+    'Уменьшить': 'Micșorează',
+    'Увеличить': 'Mărește',
+    'Доля прораба': 'Cota dirigintelui',
+
+    // удаление объекта
+    'Удаление объекта': 'Ștergerea obiectului',
+    'Объект удалится, только когда согласятся все участники сделки — инвесторы и прорабы. Пока хоть один не подтвердил, все данные остаются.': 'Obiectul va fi șters doar când vor fi de acord toți participanții — investitorii și dirigintii. Cât timp cel puțin unul nu a confirmat, toate datele rămân.',
+    'Запросить удаление': 'Cere ștergerea',
+    'Запросить удаление может только создатель объекта. После этого вас попросят подтвердить.': 'Doar creatorul obiectului poate cere ștergerea. După aceasta vi se va cere confirmarea.',
+    'Скачать выгрузку (CSV)': 'Descarcă exportul (CSV)',
+    'Объект удалится, только когда согласятся все участники сделки. Любой отказ отменяет запрос.': 'Obiectul va fi șters doar când vor fi de acord toți participanții. Orice refuz anulează cererea.',
+    'Согласие участников': 'Acordul participanților',
+    'отправил запрос': 'a trimis cererea',
+    'Будут удалены': 'Vor fi șterse',
+    'операция': 'operațiune',
+    'операции': 'operațiuni',
+    'операций': 'operațiuni',
+    'все чеки, прогноз и доли. До удаления каждый может скачать выгрузку.': 'toate bonurile, prognoza și cotele. Înainte de ștergere fiecare poate descărca exportul.',
+    'Удалить объект · ждём': 'Șterge obiectul · așteptăm',
+    'Отправить участникам запрос на удаление объекта?': 'Trimiteți participanților cererea de ștergere a obiectului?',
+    'Подтверждаете удаление объекта?': 'Confirmați ștergerea obiectului?',
+    'Запрос на удаление отклонён': 'Cererea de ștergere a fost respinsă',
+    'Объект удалён': 'Obiectul a fost șters',
+
+    // договор
+    'Распечатать / PDF': 'Tipărește / PDF',
+    'Договор формируется на румынском языке по данным объекта. Это шаблон: перед подписанием покажите его юристу или нотариусу.': 'Contractul se generează în limba română pe baza datelor obiectului. Este un model: înainte de semnare arătați-l unui jurist sau notar.',
+
+    // ошибки сервера
+    'Нужно войти': 'Trebuie să vă autentificați',
+    'Неверный email или пароль': 'Email sau parolă greșită',
+    'Проверьте email': 'Verificați emailul',
+    'Введите имя': 'Introduceți prenumele',
+    'Введите имя и фамилию': 'Introduceți prenumele și numele',
+    'Пароль — минимум 6 символов': 'Parola — minimum 6 caractere',
+    'Такой email уже зарегистрирован': 'Acest email este deja înregistrat',
+    'Введите название объекта': 'Introduceți denumirea obiectului',
+    'Введите сумму больше нуля': 'Introduceți o sumă mai mare decât zero',
+    'Доли расставляет только создатель объекта': 'Doar creatorul obiectului stabilește cotele',
+    'Доля инвестора — от 0 до 100 %': 'Cota investitorului — de la 0 la 100 %',
+    'Доли инвесторов должны давать 100 %, сейчас': 'Cotele investitorilor trebuie să facă 100 %, acum',
+    'Запроса на удаление нет': 'Nu există cerere de ștergere',
+    'Запросить удаление может только автор операции': 'Doar autorul operațiunii poate cere ștergerea',
+    'Запросить удаление может только создатель': 'Doar creatorul poate cere ștergerea',
+    'Менять объект может только создатель': 'Doar creatorul poate modifica obiectul',
+    'Не найдено': 'Nu a fost găsit',
+    'Не удалось подтвердить вход через Telegram': 'Nu s-a putut confirma autentificarea prin Telegram',
+    'Неизвестная роль': 'Rol necunoscut',
+    'Неизвестный тип операции': 'Tip de operațiune necunoscut',
+    'Неподдерживаемый формат фото': 'Format foto neacceptat',
+    'Объект не найден или у вас нет доступа': 'Obiectul nu a fost găsit sau nu aveți acces',
+    'Объект не найден': 'Obiectul nu a fost găsit',
+    'Операция не найдена': 'Operațiunea nu a fost găsită',
+    'Отозвать запрос может только автор': 'Doar autorul poate retrage cererea',
+    'Отозвать запрос может только создатель': 'Doar creatorul poate retrage cererea',
+    'Приглашать может только создатель объекта': 'Doar creatorul obiectului poate invita',
+    'Приглашение не найдено или истекло': 'Invitația nu a fost găsită sau a expirat',
+    'Проверьте долю прораба': 'Verificați cota dirigintelui',
+    'Прораб не вносит взносы, только расходы на ремонт': 'Dirigintele nu depune contribuții, doar cheltuieli de reparație',
+    'Роли меняет только создатель объекта': 'Doar creatorul obiectului schimbă rolurile',
+    'Роль «Просмотр» не голосует': 'Rolul «Vizualizare» nu votează',
+    'Роль «Просмотр» не может добавлять операции': 'Rolul «Vizualizare» nu poate adăuga operațiuni',
+    'Свою роль создатель изменить не может': 'Creatorul nu își poate schimba propriul rol',
+    'Создатель не может удалить себя': 'Creatorul nu se poate elimina pe sine',
+    'У участника есть операции — смените ему роль на «Просмотр» вместо удаления': 'Participantul are operațiuni — schimbați-i rolul în «Vizualizare» în loc de eliminare',
+    'Удалять можно только свои чеки': 'Puteți șterge doar bonurile proprii',
+    'Удалять участников может только создатель': 'Doar creatorul poate elimina participanți',
+    'Фото слишком большое': 'Fotografia este prea mare',
+    'Чек не найден': 'Bonul nu a fost găsit',
+    'Чеки можно добавлять только к своим операциям': 'Bonurile pot fi adăugate doar la operațiunile proprii',
+    'Чеки прикладываются к фактическим расходам': 'Bonurile se atașează la cheltuielile reale',
+    'Telegram-бот не настроен': 'Botul Telegram nu este configurat',
+    'Ошибка сервера, попробуйте ещё раз': 'Eroare de server, încercați din nou',
+    'Слишком большой запрос': 'Cerere prea mare'
+  };
+
+  const MONTHS = {
+    ru: ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'],
+    ro: ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec']
+  };
+
+  const CYR = 'А-Яа-яЁё';
+  const phrases = Object.keys(RO).sort((a, b) => b.length - a.length).map((k) => ({
+    k,
+    v: RO[k],
+    re: new RegExp(`(?<![${CYR}])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![${CYR}])`, 'g')
+  }));
+
+  let lang = 'ru';
+  try { lang = localStorage.getItem('dolya_lang') || ''; } catch { /* нет доступа */ }
+  if (lang !== 'ru' && lang !== 'ro') {
+    const tgLang = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user
+      ? window.Telegram.WebApp.initDataUnsafe.user.language_code : '';
+    lang = String(tgLang || navigator.language || '').toLowerCase().startsWith('ro') ? 'ro' : 'ru';
+  }
+
+  function tr(text) {
+    if (lang !== 'ro' || !text || !/[А-Яа-яЁё]/.test(text)) return text;
+    const trimmed = text.trim();
+    if (RO[trimmed] !== undefined) return text.replace(trimmed, RO[trimmed]);
+    let out = text;
+    for (const p of phrases) {
+      if (out.indexOf(p.k) === -1) continue;
+      out = out.replace(p.re, p.v);
+      if (!/[А-Яа-яЁё]/.test(out)) break;
+    }
+    return out;
+  }
+
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA']);
+  function apply(root) {
+    if (lang !== 'ro' || !root) return;
+    if (root.nodeType === 3) {
+      const t = tr(root.nodeValue);
+      if (t !== root.nodeValue) root.nodeValue = t;
+      return;
+    }
+    if (root.nodeType !== 1 || SKIP.has(root.tagName) || root.closest('[data-nt], .contract')) return;
+    for (const attr of ['placeholder', 'aria-label', 'title']) {
+      const v = root.getAttribute && root.getAttribute(attr);
+      if (v) { const t = tr(v); if (t !== v) root.setAttribute(attr, t); }
+    }
+    if (root.tagName === 'INPUT' && (root.type === 'button' || root.type === 'submit')) root.value = tr(root.value);
+    for (const child of Array.from(root.childNodes)) apply(child);
+  }
+
+  const observer = new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type === 'characterData') apply(m.target);
+      else m.addedNodes.forEach((n) => apply(n));
+    }
+  });
+
+  function start() {
+    document.documentElement.lang = lang;
+    if (lang === 'ro') {
+      document.title = 'Dolya — evidența investițiilor comune';
+      apply(document.body);
+    }
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+
+  window.I18N = {
+    get lang() { return lang; },
+    tr,
+    months: () => MONTHS[lang],
+    set(l) {
+      lang = l === 'ro' ? 'ro' : 'ru';
+      try { localStorage.setItem('dolya_lang', lang); } catch { /* нет доступа */ }
+    }
+  };
+})();
