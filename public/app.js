@@ -584,7 +584,7 @@ function viewProfile() {
       </div>` : ''}
       <details class="card fold" data-fold="p-help" style="margin-top:10px" ${foldOpen('p-help', false) ? 'open' : ''}>
         <summary><div style="flex:1;font-weight:500">Как это работает</div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
-        <div style="font-size:14px;line-height:1.55;color:#B5B5BA">Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.</div>
+        <div style="font-size:14px;line-height:1.55;color:#B5B5BA">Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки. Для защиты от мошенничества администратор Доли может просматривать сделки (без права что-либо менять).</div>
         <div style="font-size:14px;line-height:1.55;color:#B5B5BA;margin-top:10px">Совет: добавьте «Долю» на экран телефона. На iPhone — «Поделиться» → «На экран Домой», на Android — меню браузера → «Установить приложение».</div>
       </details>
       ${state.bot ? (state.me.telegram
@@ -928,7 +928,7 @@ async function viewObject(id, filter = 'all') {
   };
   app.innerHTML = `
     <div class="screen">
-      <div class="topbar">${backBtn('#/')}
+      <div class="topbar">${backBtn(me.adminView ? '#/admin/objects' : '#/')}
         <div style="display:flex;gap:8px">
           ${me.isCreator ? `<a class="icon-btn" href="#/o/${id}/edit" aria-label="Редактировать объект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></a>` : ''}
           <a class="icon-btn ${o.contract && o.contract.all_signed ? 'ok' : o.contract && o.contract.fixed ? 'pending' : ''}" href="#/o/${id}/contract" aria-label="Договор дольщиков">${o.contract && o.contract.fixed ? `<span class="dot-badge">${o.contract.all_signed ? '✓' : `${o.contract.signed}/${o.contract.total}`}</span>` : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></a>
@@ -938,6 +938,7 @@ async function viewObject(id, filter = 'all') {
       ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
       <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? (o.installment ? ` · в рассрочку за ${money(o.purchase_price)}` : ` · куплена за ${money(o.purchase_price)}`) : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
+      ${me.adminView ? `<div class="warn" style="display:flex;gap:10px;align-items:center"><span style="display:inline-flex;width:20px;height:20px;flex:none">${I.shield}</span><span>Режим администратора: только просмотр. Вы не участник этой сделки, изменить ничего нельзя.</span></div>` : ''}
       ${(() => { const w = d.entries.filter((e) => e.need_my_vote || e.need_my_edit_vote); return w.length ? `<a class="card gold" href="#/e/${w[0].id}" style="display:block;margin-top:14px;font-size:14px">${w.length === 1 ? 'Операция ждёт' : `${w.length} ${plural(w.length, 'операция ждёт', 'операции ждут', 'операций ждут')}`} вашего ответа: удаление или исправление →</a>` : ''; })()}
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
       ${o.installment ? (() => {
@@ -1976,17 +1977,61 @@ async function viewAdminUsers() {
     <div class="screen no-tab">
       <div class="topbar">${backBtn('#/profile')}<div class="title"><b>Пользователи</b><small>статистика Доли</small></div><div class="spacer44"></div></div>
       <div class="stats" style="margin-top:18px">${tile('Всего', st.users_total, `+${st.users_new_7} за 7 дней`)}${tile('Активны', st.users_active_7, 'за 7 дней')}${tile('В боте', st.bot_total, st.bot_only ? `${st.bot_only} без входа` : 'все вошли')}</div>
+      <a class="btn ghost sm" href="#/admin/objects" style="width:100%;margin-top:10px">Все сделки и объекты · проверка</a>
       <div class="stats" style="margin-top:8px">${tile('Объекты', st.objects_active, 'в работе')}${tile('Продано', st.objects_closed, 'сделок')}${tile('Доска', st.offers + st.investors, `${st.offers} ${plural(st.offers, 'сделка', 'сделки', 'сделок')} · ${st.investors} инв.`)}</div>
       <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">«В боте» — все, кто открывал бота${state.bot ? ` <span data-nt>@${esc(state.bot)}</span>` : ''}; «без входа» — написали боту, но ещё не открыли приложение. Подсчёт написавших боту ведётся с этого обновления.</div>
       <div class="label" style="display:flex;justify-content:space-between"><span>Зарегистрированы</span><span>${st.users.length}</span></div>
-      <div class="card list">${st.users.map((u) => `<div class="row">${avatar(u.id, u.name)}
+      <div class="card list">${st.users.map((u) => `<a class="row" href="#/admin/u/${u.id}" style="color:var(--text)">${avatar(u.id, u.name)}
         <div class="grow"><div class="t" style="font-size:14px">${esc(u.name)}${u.is_admin ? ' <span class="badge gold">админ</span>' : ''}</div>
           <div class="s">${u.tg_username ? `<span data-nt>@${esc(u.tg_username)}</span>` : u.tg ? 'Telegram' : 'email'} · ${dateRu(u.joined)}${u.seen ? ` · ${I18N.tr('был')} ${dateRu(u.seen)}` : ''}</div></div>
-        <div class="r"><div class="num" style="font-size:14px">${u.objects}</div><div class="muted" style="font-size:11px">${plural(u.objects, 'объект', 'объекта', 'объектов')}</div></div></div>`).join('')}</div>
+        <div class="r"><div class="num" style="font-size:14px">${u.objects}</div><div class="muted" style="font-size:11px">${plural(u.objects, 'объект', 'объекта', 'объектов')}</div></div></a>`).join('')}</div>
     </div>`;
 }
 
+
+const adminObjRow = (o) => `<a class="row" href="#/o/${o.id}" style="color:var(--text)">
+  <div class="grow"><div class="t" style="font-size:14px"><span data-nt>${esc(o.name)}</span> <span class="badge ${esc(o.status)}">${esc(o.status)}</span>${o.role ? ` <span class="muted" style="font-size:12px">· ${esc(ROLE_RU[o.role] || o.role)}</span>` : ''}</div>
+    <div class="s">${esc(o.creator)} · ${dateRu(o.created)} · ${o.people} ${plural(o.people, 'участник', 'участника', 'участников')} · ${o.ops} ${plural(o.ops, 'операция', 'операции', 'операций')} · ${o.receipts} ${plural(o.receipts, 'чек', 'чека', 'чеков')}</div>
+    ${o.checked ? `<div class="s okc" style="font-size:11px">проверено ${dateRu(o.checked)}</div>` : ''}</div>
+  <div class="r"><div class="num" style="font-size:14px">${money(o.spent)}</div><div class="muted" style="font-size:11px">расходы</div></div></a>`;
+const ROLE_RU = { investor: 'инвестор', foreman: 'прораб', viewer: 'просмотр' };
+
+async function viewAdminObjects() {
+  if (!state.me.is_admin) return go('#/profile');
+  const d = await api('GET', '/api/admin/objects');
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/admin/users')}<div class="title"><b>Все сделки</b><small>проверка на мошенничество</small></div><div class="spacer44"></div></div>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:14px">Только просмотр: операции, чеки, доли, договоры и авансы. Каждый ваш просмотр записывается в журнал.</div>
+      ${d.objects.length ? `<div class="card list" style="margin-top:12px">${d.objects.map(adminObjRow).join('')}</div>` : '<div class="empty">Объектов пока нет.</div>'}
+    </div>`;
+}
+
+async function viewAdminUser(uid) {
+  if (!state.me.is_admin) return go('#/profile');
+  const d = await api('GET', `/api/admin/users/${uid}`);
+  const u = d.user;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/admin/users')}<div class="spacer44"></div></div>
+      <div style="display:flex;align-items:center;gap:14px;margin-top:18px">${avatar(u.id, u.name, 'lg')}<div><h1 class="h" style="margin:0;font-size:24px">${esc(u.name)}</h1>
+        <div class="muted" style="font-size:13px">${u.tg_username ? `<span data-nt>@${esc(u.tg_username)}</span> · ` : ''}в Доле с ${dateRu(u.joined)}${u.seen ? ` · был ${dateRu(u.seen)}` : ''}</div></div></div>
+      <div class="card" style="margin-top:14px;font-size:14px">
+        <div class="kv"><span class="muted">Email</span><span data-nt>${esc(u.email)}</span></div>
+        ${u.phone ? `<div class="kv"><span class="muted">Телефон</span><span>${esc(u.phone)}</span></div>` : ''}
+        ${d.investor ? `<div class="kv"><span class="muted">Анкета инвестора</span><span class="num">${rangeText(d.investor.amount_from, d.investor.amount_to)} · ${OFFER_STATUS[d.investor.status] || d.investor.status}</span></div>` : ''}
+      </div>
+      ${u.tg_username ? `<button class="btn ghost sm" data-ext="https://t.me/${esc(u.tg_username)}" style="width:100%;margin-top:10px">Написать в Telegram</button>` : ''}
+      <div class="label" style="display:flex;justify-content:space-between"><span>Объекты</span><span>${d.objects.length}</span></div>
+      ${d.objects.length ? `<div class="card list">${d.objects.map(adminObjRow).join('')}</div>` : '<div class="card empty">Нет объектов.</div>'}
+      ${d.offers.length ? `<div class="label">Предложения на доске</div><div class="card list">${d.offers.map((o) => `<a class="row" href="#/market/o/${o.id}" style="color:var(--text)"><div class="grow"><div class="t" data-nt style="font-size:14px">${esc(o.title)}</div><div class="s">${OFFER_STATUS[o.status] || o.status}</div></div><div class="r num">${money(o.need_amount)}</div></a>`).join('')}</div>` : ''}
+    </div>`;
+  bindExt();
+}
+
 const routes = [
+  [/^#\/admin\/objects$/, () => viewAdminObjects()],
+  [/^#\/admin\/u\/(\d+)$/, (m) => viewAdminUser(m[1])],
   [/^#\/admin\/users$/, () => viewAdminUsers()],
   [/^#\/market$/, () => viewMarket('deals')],
   [/^#\/market\/investors$/, () => viewMarket('investors')],

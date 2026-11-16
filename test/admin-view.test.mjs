@@ -1,0 +1,36 @@
+// Администратор видит чужие сделки только на чтение, просмотр пишется в журнал.
+import { execSync } from 'child_process';
+const BASE = 'http://localhost:3999';
+let failures = 0;
+const ok = (c, m) => { if (!c) { failures++; console.log('FAIL', m); } else console.log('ok  ', m); };
+function client() { let cookie = ''; return async (method, path, body) => { const r = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', cookie }, body: body ? JSON.stringify(body) : undefined }); const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0]; const ct = r.headers.get('content-type') || ''; return { status: r.status, data: ct.includes('json') ? await r.json() : await r.text() }; }; }
+const sfx = Date.now();
+const ADM = client(), U = client(), X = client();
+const reg = async (c, f, l) => (await c('POST', '/api/register', { email: `${f}${sfx}@av.md`, first_name: f, last_name: l, password: 'secret1' })).data.user.id;
+const adm = await reg(ADM, 'Админ', 'Проверка'); const uid = await reg(U, 'Вася', 'Владелец'); await reg(X, 'Чужой', 'Человек');
+execSync(`psql -h /tmp -p 5433 -U postgres -d dolya -c "update users set is_admin=true where id=${adm}"`);
+const oid = (await U('POST', '/api/objects', { name: 'Тестовый', purchase_price: 50000, sale_price: 70000 })).data.id;
+const e = await U('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 1000, category: 'Ремонт', note: 'краска' });
+const eid = e.data.id || (e.data.entry && e.data.entry.id);
+ok((await X('GET', `/api/objects/${oid}`)).status === 404, 'stranger cannot see object');
+let r = await ADM('GET', `/api/objects/${oid}`);
+ok(r.status === 200 && r.data.me.adminView && !r.data.me.canAdd && !r.data.me.isCreator, 'admin sees object read-only');
+ok(r.data.entries.length === 1, 'admin sees entries');
+const realEid = r.data.entries[0].id;
+ok((await ADM('GET', `/api/entries/${realEid}`)).status === 200, 'admin sees entry');
+ok((await ADM('GET', `/api/objects/${oid}/report?lang=ru`)).status === 200, 'admin sees report');
+ok((await ADM('GET', `/api/objects/${oid}/contract`)).status === 200, 'admin sees contract');
+ok((await ADM('GET', `/api/objects/${oid}/export.csv`)).status === 200, 'admin downloads csv');
+ok((await ADM('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 5 })).status === 404, 'admin cannot add entry');
+ok((await ADM('DELETE', `/api/entries/${realEid}`)).status >= 400, 'admin cannot delete entry');
+ok((await ADM('PATCH', `/api/objects/${oid}`, { name: 'x' })).status >= 400, 'admin cannot edit object');
+ok((await ADM('POST', `/api/objects/${oid}/close`, { sold_price: 1, receiver_id: adm })).status >= 400, 'admin cannot close deal');
+const log = execSync(`psql -h /tmp -p 5433 -U postgres -d dolya -Atc "select count(*) from admin_views where admin_id=${adm} and object_id=${oid}"`).toString().trim();
+ok(log === '1', 'view logged once per hour');
+r = await ADM('GET', `/api/admin/users/${uid}`);
+ok(r.status === 200 && r.data.objects.length === 1 && r.data.objects[0].role === 'investor' && r.data.objects[0].checked, 'admin user card with objects');
+r = await ADM('GET', '/api/admin/objects');
+ok(r.data.objects.some((o) => o.id === oid && o.ops === 1), 'admin all objects');
+ok((await U('GET', '/api/admin/objects')).status === 403, 'non-admin blocked');
+console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
+process.exit(failures ? 1 : 0);

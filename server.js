@@ -174,6 +174,22 @@ async function membership(objectId, userId) {
   return m;
 }
 
+// Просмотр: участник или администратор (только чтение, для проверки на мошенничество)
+async function viewAccess(objectId, user) {
+  const m = await db.one(
+    `SELECT m.*, o.creator_id, o.delete_requested_at FROM members m JOIN objects o ON o.id = m.object_id
+     WHERE m.object_id = $1 AND m.user_id = $2`,
+    [objectId, user.id]
+  );
+  if (m) { m.isCreator = Number(m.creator_id) === Number(user.id); return m; }
+  if (!user.is_admin) fail(404, 'Объект не найден или у вас нет доступа');
+  const o = await db.one('SELECT id, creator_id FROM objects WHERE id = $1', [objectId]);
+  if (!o) fail(404, 'Объект не найден');
+  const recent = await db.one(`SELECT id FROM admin_views WHERE admin_id = $1 AND object_id = $2 AND viewed_at > now() - interval '1 hour'`, [user.id, o.id]);
+  if (!recent) await db.query('INSERT INTO admin_views (admin_id, object_id) VALUES ($1, $2)', [user.id, o.id]);
+  return { role: 'viewer', isCreator: false, adminView: true, creator_id: o.creator_id };
+}
+
 async function loadObject(objectId) {
   const object = await db.one(
     `SELECT id, name, area, status, purchase_price, sale_price, repair_budget, installment, installment_monthly, creator_id, delete_requested_at, created_at,
@@ -440,6 +456,41 @@ route('GET', '/api/admin/stats', async ({ user }) => {
   };
 });
 
+async function adminObjectRows(where, params) {
+  const rows = await db.query(
+    `SELECT o.id, o.name, o.status, to_char(o.created_at, 'YYYY-MM-DD') AS created, to_char(o.sold_at, 'YYYY-MM-DD') AS sold_at, o.creator_id, uc.name AS creator,
+            (SELECT COUNT(*) FROM members m WHERE m.object_id = o.id)::int AS people,
+            (SELECT COUNT(*) FROM entries e WHERE e.object_id = o.id)::int AS ops,
+            (SELECT COALESCE(SUM(e.amount), 0) FROM entries e WHERE e.object_id = o.id AND e.kind = 'out') AS spent,
+            (SELECT COUNT(*) FROM receipts r JOIN entries e ON e.id = r.entry_id WHERE e.object_id = o.id)::int AS receipts,
+            (SELECT to_char(MAX(v.viewed_at), 'YYYY-MM-DD') FROM admin_views v WHERE v.object_id = o.id) AS checked
+     FROM objects o JOIN users uc ON uc.id = o.creator_id ${where} ORDER BY o.created_at DESC LIMIT 300`,
+    params
+  );
+  return rows.map((r) => ({ id: Number(r.id), name: r.name, status: r.status, created: r.created, sold_at: r.sold_at, creator_id: Number(r.creator_id), creator: r.creator,
+    people: Number(r.people), ops: Number(r.ops), spent: Number(r.spent), receipts: Number(r.receipts), checked: r.checked }));
+}
+route('GET', '/api/admin/objects', async ({ user }) => {
+  if (!user.is_admin) fail(403, 'Только для администратора приложения');
+  return { objects: await adminObjectRows('', []) };
+});
+route('GET', '/api/admin/users/:id', async ({ user, params }) => {
+  if (!user.is_admin) fail(403, 'Только для администратора приложения');
+  const u = await db.one(`SELECT id, name, email, tg_username, phone, to_char(created_at, 'YYYY-MM-DD') AS joined, to_char(last_seen_at, 'YYYY-MM-DD') AS seen FROM users WHERE id = $1`, [params.id]);
+  if (!u) fail(404, 'Пользователь не найден');
+  const roles = await db.query('SELECT object_id, role FROM members WHERE user_id = $1', [u.id]);
+  const roleOf = Object.fromEntries(roles.map((r) => [Number(r.object_id), r.role]));
+  const objects = (await adminObjectRows('WHERE o.id IN (SELECT object_id FROM members WHERE user_id = $1)', [u.id])).map((o) => ({ ...o, role: roleOf[o.id] }));
+  const offers = await db.query(`SELECT id, title, status, need_amount FROM market_offers WHERE user_id = $1 ORDER BY created_at DESC`, [u.id]);
+  const profile = await db.one('SELECT amount_from, amount_to, status FROM investor_profiles WHERE user_id = $1', [u.id]);
+  return {
+    user: { id: Number(u.id), name: u.name, email: u.email, tg_username: u.tg_username, phone: u.phone, joined: u.joined, seen: u.seen },
+    objects,
+    offers: offers.map((o) => ({ id: o.id, title: o.title, status: o.status, need_amount: Number(o.need_amount) })),
+    investor: profile ? { amount_from: num(profile.amount_from), amount_to: num(profile.amount_to), status: profile.status } : null
+  };
+});
+
 route('PUT', '/api/admin/settings', async ({ user, body }) => {
   if (!user.is_admin) fail(403, 'Только для администратора приложения');
   if (typeof body.personal_data === 'boolean') {
@@ -596,7 +647,7 @@ route('POST', '/api/objects', async ({ user, body }) => {
 });
 
 route('GET', '/api/objects/:id', async ({ user, params }) => {
-  const me = await membership(params.id, user.id);
+  const me = await viewAccess(params.id, user);
   const { object, members, entries, advances } = await loadObject(params.id);
   const calc = computeObject(object, members, entries, advances);
   const names = Object.fromEntries(members.map((m) => [m.user_id, m.name]));
@@ -622,7 +673,8 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       role: me.role,
       isCreator: me.isCreator,
       canAdd: me.role === 'investor' || me.role === 'foreman',
-      canVote: me.role === 'investor' || me.role === 'foreman'
+      canVote: me.role === 'investor' || me.role === 'foreman',
+      adminView: !!me.adminView
     },
     members: members.map((m) => memberView(m, calc)),
     entries: entries.map((e) => ({
@@ -667,7 +719,7 @@ async function reportHtml(objectId, lang, printable) {
 }
 
 route('GET', '/api/objects/:id/report', async ({ req, user, params }) => {
-  await membership(params.id, user.id);
+  await viewAccess(params.id, user);
   const lang = new URL(req.url, 'http://x').searchParams.get('lang') === 'ro' ? 'ro' : 'ru';
   return { html: await reportHtml(params.id, lang, false) };
 });
@@ -809,15 +861,15 @@ route('POST', '/api/objects/:id/advances', async ({ user, params, body }) => {
 
 // ---------- договор аванса с покупателем ----------
 
-async function loadAdvance(id, user) {
+async function loadAdvance(id, user, view = false) {
   const a = await db.one(
     `SELECT a.*, to_char(a.received_date, 'YYYY-MM-DD') AS received_date, to_char(a.valid_until, 'YYYY-MM-DD') AS valid_until
      FROM advances a WHERE a.id = $1`,
     [id]
   );
   if (!a) fail(404, 'Аванс не найден');
-  const me = await membership(a.object_id, user.id);
-  return { a, me, canEdit: Number(a.user_id) === Number(user.id) || me.isCreator };
+  const me = view ? await viewAccess(a.object_id, user) : await membership(a.object_id, user.id);
+  return { a, me, canEdit: !me.adminView && (Number(a.user_id) === Number(user.id) || me.isCreator) };
 }
 
 async function advanceHtml(a, printable) {
@@ -841,7 +893,7 @@ async function advanceHtml(a, printable) {
 }
 
 route('GET', '/api/advances/:id', async ({ user, params }) => {
-  const { a, canEdit } = await loadAdvance(params.id, user);
+  const { a, canEdit } = await loadAdvance(params.id, user, true);
   const { html, signatures } = await advanceHtml(a, false);
   const seller = await db.one('SELECT name FROM users WHERE id = $1', [a.user_id]);
   return {
@@ -974,7 +1026,7 @@ async function contractHtml(objectId, printable) {
 }
 
 route('GET', '/api/objects/:id/contract', async ({ user, params }) => {
-  const me = await membership(params.id, user.id);
+  const me = await viewAccess(params.id, user);
   const live = await liveSnapshot(params.id);
   const v = await latestVersion(params.id);
   const data = v ? (typeof v.data === 'string' ? JSON.parse(v.data) : v.data) : null;
@@ -1249,7 +1301,7 @@ route('GET', '/api/entries/:id', async ({ user, params }) => {
     [params.id]
   );
   if (!e) fail(404, 'Операция не найдена');
-  const me = await membership(e.object_id, user.id);
+  const me = await viewAccess(e.object_id, user);
   const receipts = await db.query(
     `SELECT id, to_char(created_at, 'YYYY-MM-DD') AS created FROM receipts WHERE entry_id = $1 ORDER BY id`,
     [e.id]
@@ -1479,7 +1531,7 @@ route('DELETE', '/api/receipts/:id', async ({ user, params }) => {
     [params.id]
   );
   if (!r) fail(404, 'Чек не найден');
-  await membership(r.object_id, user.id);
+  await viewAccess(r.object_id, user);
   if (Number(r.user_id) !== Number(user.id)) fail(403, 'Удалять можно только свои чеки');
   await db.query('DELETE FROM receipts WHERE id = $1', [params.id]);
   return { ok: true };
@@ -1556,7 +1608,7 @@ async function serveReceipt(req, res, id) {
 async function serveObjectPhoto(req, res, id) {
   const user = await currentUser(req);
   if (!user) fail(401, 'Нужно войти');
-  await membership(id, user.id);
+  await viewAccess(id, user);
   const r = await db.one(`SELECT photo_mime, encode(photo, 'base64') AS b64 FROM objects WHERE id = $1 AND photo IS NOT NULL`, [id]);
   if (!r) fail(404, 'Фото нет');
   const buf = Buffer.from(r.b64, 'base64');
@@ -1570,7 +1622,7 @@ async function serveExport(req, res, id, viaLink, lang) {
   if (!viaLink) {
     const user = await currentUser(req);
     if (!user) fail(401, 'Нужно войти');
-    await membership(id, user.id);
+    await viewAccess(id, user);
   }
   const { object, entries } = await loadObject(id);
   if (!lang) lang = new URL(req.url, 'http://x').searchParams.get('lang') === 'ro' ? 'ro' : 'ru';

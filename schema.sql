@@ -268,3 +268,11 @@ CREATE TABLE IF NOT EXISTS bot_users (
   first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Журнал просмотров объектов администратором
+CREATE TABLE IF NOT EXISTS admin_views (
+  id SERIAL PRIMARY KEY,
+  admin_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  viewed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
