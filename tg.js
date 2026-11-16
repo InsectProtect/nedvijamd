@@ -66,6 +66,8 @@ async function setup(publicUrl) {
     console.warn('PUBLIC_URL/RENDER_EXTERNAL_URL не задан — вебхук Telegram не настроен');
     return;
   }
+  const prev = await call('getWebhookInfo');
+  console.log('telegram webhook before setup:', prev ? prev.url || '(нет)' : '?');
   await call('setWebhook', {
     url: `${publicUrl}/tg/webhook`,
     secret_token: webhookSecret(),
@@ -76,12 +78,17 @@ async function setup(publicUrl) {
   await call('setMyCommands', { commands: [{ command: 'start', description: 'Открыть Долю' }] });
   await call('setMyDescription', { description: 'Доля — учёт совместных вложений в недвижимость: взносы, расходы с чеками, план и факт, доли и прогноз прибыли. Нажмите «Запустить», затем кнопку «Доля».' });
   console.log(`Telegram-бот @${botUsername} подключён`);
-  // Диагностика: куда Telegram шлёт обновления и были ли ошибки доставки
-  setTimeout(async () => {
+  // Сторожок: если другой сервис (например, конструктор ботов) перехватил вебхук — возвращаем и пишем в журнал
+  const want = `${publicUrl}/tg/webhook`;
+  setInterval(async () => {
     const info = await call('getWebhookInfo');
-    const menu = await call('getChatMenuButton', {});
-    console.log('telegram webhook:', JSON.stringify(info), 'menu:', JSON.stringify(menu));
-  }, 20000);
+    if (info && info.url !== want) {
+      console.warn(`telegram webhook перехвачен: ${info.url || '(пусто)'} — возвращаю`);
+      await call('setWebhook', { url: want, secret_token: webhookSecret(), allowed_updates: ['message'] });
+    } else if (info && info.last_error_message) {
+      console.warn('telegram webhook error:', info.last_error_message);
+    }
+  }, 60 * 1000);
 }
 
 const escHtml = (s) => String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
