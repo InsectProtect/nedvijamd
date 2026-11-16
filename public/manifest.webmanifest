@@ -1,0 +1,9 @@
+{
+  "name": "Доля — учёт совместных вложений",
+  "short_name": "Доля",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D0D0E",
+  "theme_color": "#0D0D0E",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
