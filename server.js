@@ -106,10 +106,10 @@ async function currentUser(req) {
   const sid = parseCookies(req).sid || req.headers['x-session'];
   if (!sid) return null;
   const u = await db.one(
-    'SELECT u.id, u.email, u.name, u.telegram_id, u.tg_username, u.lang FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1',
+    'SELECT u.id, u.email, u.name, u.telegram_id, u.tg_username, u.lang, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1',
     [String(sid)]
   );
-  if (u) { u.telegram = !!u.telegram_id; u.needs_name = needsName(u.name); }
+  if (u) { u.telegram = !!u.telegram_id; u.needs_name = needsName(u.name); u.is_admin = u.is_admin === true || u.is_admin === 't'; }
   if (u) delete u.telegram_id;
   return u;
 }
@@ -340,7 +340,42 @@ route('POST', '/api/logout', async ({ req }) => {
   return { status: 200, data: { ok: true }, headers: { 'Set-Cookie': sessionCookie(req, '', 0) } };
 }, { auth: false });
 
-route('GET', '/api/me', async ({ user }) => ({ user, categories: CATEGORIES, bot: tg.username() || null }));
+// Настройки приложения (переключает администратор)
+async function getSetting(key, def) {
+  const r = await db.one('SELECT value FROM app_settings WHERE key = $1', [key]);
+  if (!r) return def;
+  return typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+}
+const personalDataOn = () => getSetting('personal_data', false);
+const ADMIN_TG = String(process.env.ADMIN_TG_USERNAMES || '').split(',').map((s) => s.trim().replace(/^@/, '').toLowerCase()).filter(Boolean);
+
+async function myProfile(userId) {
+  const u = await db.one(
+    `SELECT id, email, name, tg_username, lang, telegram_id, is_admin, idnp, address, phone, to_char(birth_date, 'YYYY-MM-DD') AS birth_date FROM users WHERE id = $1`,
+    [userId]
+  );
+  return {
+    id: u.id, email: u.email, name: u.name, tg_username: u.tg_username, lang: u.lang, telegram: !!u.telegram_id,
+    needs_name: needsName(u.name), is_admin: u.is_admin === true || u.is_admin === 't',
+    idnp: u.idnp || '', address: u.address || '', phone: u.phone || '', birth_date: u.birth_date || ''
+  };
+}
+
+route('GET', '/api/me', async ({ user }) => ({
+  user: await myProfile(user.id), categories: CATEGORIES, bot: tg.username() || null,
+  settings: { personal_data: await personalDataOn() }
+}));
+
+route('PUT', '/api/admin/settings', async ({ user, body }) => {
+  if (!user.is_admin) fail(403, 'Только для администратора приложения');
+  if (typeof body.personal_data === 'boolean') {
+    await db.query(
+      `INSERT INTO app_settings (key, value) VALUES ('personal_data', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(body.personal_data)]
+    );
+  }
+  return { settings: { personal_data: await personalDataOn() } };
+});
 
 // Имя, фамилия и язык
 route('PATCH', '/api/me', async ({ user, body }) => {
@@ -350,14 +385,24 @@ route('PATCH', '/api/me', async ({ user, body }) => {
     await db.query('UPDATE users SET name = $1 WHERE id = $2', [name, user.id]);
   }
   if (body.lang === 'ru' || body.lang === 'ro') await db.query('UPDATE users SET lang = $1 WHERE id = $2', [body.lang, user.id]);
+  const personal = ['idnp', 'address', 'phone', 'birth_date'].some((k) => body[k] !== undefined);
+  if (personal && !(await personalDataOn())) fail(403, 'Ввод личных данных сейчас выключен');
   if (body.idnp !== undefined) {
     const idnp = String(body.idnp || '').replace(/\s/g, '');
     if (idnp && !/^\d{13}$/.test(idnp)) fail(400, 'IDNP — 13 цифр');
     await db.query('UPDATE users SET idnp = $1 WHERE id = $2', [idnp || null, user.id]);
   }
   if (body.address !== undefined) await db.query('UPDATE users SET address = $1 WHERE id = $2', [str(body.address, 300) || null, user.id]);
-  const u = await db.one('SELECT id, email, name, tg_username, lang, telegram_id FROM users WHERE id = $1', [user.id]);
-  return { user: { id: u.id, email: u.email, name: u.name, tg_username: u.tg_username, lang: u.lang, telegram: !!u.telegram_id, needs_name: needsName(u.name) } };
+  if (body.phone !== undefined) {
+    const phone = str(body.phone, 30);
+    if (phone && !/^\+?[\d\s()-]{6,20}$/.test(phone)) fail(400, 'Проверьте номер телефона');
+    await db.query('UPDATE users SET phone = $1 WHERE id = $2', [phone || null, user.id]);
+  }
+  if (body.birth_date !== undefined) {
+    const bd = /^\d{4}-\d{2}-\d{2}$/.test(body.birth_date || '') ? body.birth_date : null;
+    await db.query('UPDATE users SET birth_date = $1::date WHERE id = $2', [bd, user.id]);
+  }
+  return { user: await myProfile(user.id) };
 });
 
 // Вход из Telegram Mini App: проверяем подпись initData, находим или создаём аккаунт
@@ -374,6 +419,9 @@ route('POST', '/api/tg-login', async ({ req, body }) => {
     );
   } else {
     await db.query('UPDATE users SET tg_username = $1 WHERE id = $2', [tu.username || null, user.id]);
+  }
+  if (tu.username && ADMIN_TG.includes(String(tu.username).toLowerCase())) {
+    await db.query('UPDATE users SET is_admin = true WHERE id = $1', [user.id]);
   }
   const sess = await startSession(req, null, user.id);
   return {
@@ -525,8 +573,9 @@ async function signaturesOf(versionId) {
 
 async function partyDetails(userIds) {
   if (!userIds.length) return {};
-  const rows = await db.query(`SELECT id, idnp, address FROM users WHERE id = ANY($1::int[])`, [`{${userIds.join(',')}}`]);
-  return Object.fromEntries(rows.map((r) => [Number(r.id), { idnp: r.idnp, address: r.address }]));
+  if (!(await personalDataOn())) return {};
+  const rows = await db.query(`SELECT id, idnp, address, to_char(birth_date, 'YYYY-MM-DD') AS birth_date FROM users WHERE id = ANY($1::int[])`, [`{${userIds.join(',')}}`]);
+  return Object.fromEntries(rows.map((r) => [Number(r.id), { idnp: r.idnp, address: r.address, birth_date: r.birth_date }]));
 }
 
 async function contractStatus(objectId) {
@@ -571,6 +620,7 @@ route('GET', '/api/objects/:id/contract', async ({ user, params }) => {
     })),
     fields: live.fields,
     installment: !!live.installment,
+    personal_data: await personalDataOn(),
     me: { idnp: mine.idnp || '', address: mine.address || '', is_party: parties.some((p) => p.user_id === Number(user.id)), isCreator: me.isCreator },
     live_parties: live.parties.map((p) => ({ user_id: p.user_id, name: p.name }))
   };
@@ -621,8 +671,9 @@ route('POST', '/api/objects/:id/contract/sign', async ({ user, params, body }) =
   const data = typeof v.data === 'string' ? JSON.parse(v.data) : v.data;
   if (!data.parties.some((p) => p.user_id === Number(user.id))) fail(403, 'Вы не сторона этого договора');
   if (body.agree !== true) fail(400, 'Подтвердите, что прочитали договор');
-  const u = await db.one('SELECT idnp, address FROM users WHERE id = $1', [user.id]);
-  if (!u.idnp || !u.address) fail(400, 'Заполните IDNP и адрес');
+  const pd = await personalDataOn();
+  const u = pd ? await db.one('SELECT idnp, address FROM users WHERE id = $1', [user.id]) : { idnp: null, address: null };
+  if (pd && (!u.idnp || !u.address)) fail(400, 'Заполните IDNP и адрес');
   const img = String(body.signature || '').replace(/^data:image\/png;base64,/, '');
   const buf = Buffer.from(img, 'base64');
   if (buf.length < 200 || buf.length > 400 * 1024 || buf.readUInt32BE(0) !== 0x89504e47) fail(400, 'Подпись не распознана — распишитесь ещё раз');
@@ -1181,6 +1232,9 @@ async function main() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   for (const stmt of schema.split(';').map((s) => s.trim()).filter(Boolean)) {
     await db.query(stmt);
+  }
+  if (ADMIN_TG.length) {
+    await db.query(`UPDATE users SET is_admin = true WHERE lower(tg_username) = ANY($1::text[])`, [`{${ADMIN_TG.join(',')}}`]);
   }
   // Чистим старые сессии
   await db.query(`DELETE FROM sessions WHERE created_at < now() - interval '180 days'`);

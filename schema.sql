@@ -138,3 +138,12 @@ CREATE TABLE IF NOT EXISTS contract_signatures (
   PRIMARY KEY (version_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS contract_versions_object_idx ON contract_versions(object_id);
+
+-- Личные данные и администрирование
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL
+);

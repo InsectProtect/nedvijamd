@@ -75,7 +75,7 @@ function buildContract(snap, { signatures = {}, details = {}, printable = false,
   const ownerName = owner ? owner.name : f.owner_name;
 
   const partyList = parties.map((m, i) => `
-    <p><b>${i + 1}. ${esc(m.name)}</b>, IDNP ${val(info(m.user_id).idnp, 150)}, domiciliat(ă) în ${val(info(m.user_id).address, 240)},
+    <p><b>${i + 1}. ${esc(m.name)}</b>${(details[m.user_id] || {}).birth_date ? `, născut(ă) la <b>${dmy(details[m.user_id].birth_date)}</b>` : ''}, IDNP ${val(info(m.user_id).idnp, 150)}, domiciliat(ă) în ${val(info(m.user_id).address, 240)},
     în calitate de <b>${m.role === 'investor' ? 'Investitor' : 'Diriginte de șantier'}</b>,</p>`).join('');
 
   const investorRows = investors.map((m) => `

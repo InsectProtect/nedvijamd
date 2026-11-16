@@ -119,6 +119,18 @@ ok(cl.status === 200 && ch.includes('window.print()'), 'printable contract link 
 r = await A('PATCH', '/api/me', { lang: 'ro' });
 ok(r.data.user.lang === 'ro', 'language saved');
 
+// личные данные: выключены по умолчанию, включает администратор
+r = await A('PATCH', '/api/me', { idnp: '2001234567890' });
+ok(r.status === 403, 'personal data input is off by default');
+r = await A('PUT', '/api/admin/settings', { personal_data: true });
+ok(r.status === 403, 'only app admin toggles personal data');
+const { execSync } = await import('child_process');
+execSync(`psql -h /tmp -p 5433 -U postgres -d ${process.env.TEST_DB || 'dolya'} -c "update users set is_admin = true where email = 'artem${sfx}@t.md'"`);
+r = await A('PUT', '/api/admin/settings', { personal_data: true });
+ok(r.status === 200 && r.data.settings.personal_data === true, 'admin enabled personal data');
+r = await A('PATCH', '/api/me', { phone: '+373 69 123456', birth_date: '1990-05-01' });
+ok(r.status === 200 && r.data.user.phone === '+373 69 123456' && r.data.user.birth_date === '1990-05-01', 'phone and birth date saved');
+
 // подписание договора
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(400, 1)]).toString('base64');
 r = await D('GET', `/api/objects/${oid}/contract`);
@@ -158,6 +170,11 @@ ok(r.data.version.stale === true, 'changing shares marks contract stale');
 await A('PUT', `/api/objects/${oid}/shares`, { members: [{ user_id: ids['Артём'], share_pct: 50 }, { user_id: ids['Денис'], share_pct: 50 }, { user_id: ids['Игорь'], foreman_mode: 'pct', foreman_value: 10 }] });
 r = await D('GET', `/api/objects/${oid}/contract`);
 ok(r.data.version.stale === false, 'reverting shares clears stale');
+r = await A('GET', `/api/objects/${oid}/contract`);
+ok(r.data.html.includes('născut(ă) la <b>01.05.1990</b>'), 'birth date in contract');
+await A('PUT', '/api/admin/settings', { personal_data: false });
+r = await D('GET', `/api/objects/${oid}/contract`);
+ok(r.data.personal_data === false, 'switch off visible to participants');
 
 // удаление операции с согласия всех
 r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 300, note: 'Ошибка' });

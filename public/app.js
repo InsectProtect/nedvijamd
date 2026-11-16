@@ -2,7 +2,7 @@
 /* Доля — клиент. Без сборки, без зависимостей. */
 
 const app = document.getElementById('app');
-const state = { me: null, categories: [], cache: {}, bot: null };
+const state = { me: null, categories: [], cache: {}, bot: null, settings: { personal_data: false } };
 const TG = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
 const sessionToken = {
   get() { try { return localStorage.getItem('dolya_session') || ''; } catch { return ''; } },
@@ -356,7 +356,7 @@ async function viewContract(id) {
         <div class="rows" style="margin-top:6px">${st.map((p) => `
           <div class="row" style="padding:10px 0">${avatar(p.user_id, p.name)}
             <div class="grow"><div class="t" style="font-size:14px">${esc(p.name)}${p.user_id === state.me.id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
-              <div class="s">${ROLE[p.role]}${p.has_details ? '' : ' · <span class="red">нет IDNP или адреса</span>'}</div></div>
+              <div class="s">${ROLE[p.role]}${p.has_details || !d.personal_data ? '' : ' · <span class="red">нет IDNP или адреса</span>'}</div></div>
             ${p.signed_at ? `<span class="signed-pill">${I.check}Подписал · ${timeRu(p.signed_at)}</span>` : d.fixed ? '<span class="muted" style="font-size:12px">ждём подписи</span>' : ''}
           </div>`).join('')}</div>
         ${d.version && d.version.stale ? `<div class="warn">Условия объекта изменились после отправки договора на подпись (доли, суммы или данные).${d.me.isCreator ? ' Отправьте новую редакцию — подписи придётся поставить заново.' : ' Создатель может отправить новую редакцию.'}</div>` : ''}
@@ -364,7 +364,8 @@ async function viewContract(id) {
         ${d.me.isCreator ? `<button class="btn ${d.fixed ? 'ghost' : ''}" id="fix" style="margin-top:10px">${d.fixed ? 'Отправить новую редакцию на подпись' : 'Отправить на подпись'}</button>` : ''}
       </div>
 
-      ${d.me.is_party || d.live_parties.some((p) => p.user_id === state.me.id) ? `
+      ${!d.personal_data ? '<div class="card dashed" style="margin-top:12px;font-size:13px;line-height:1.5;color:#B5B5BA">IDNP и адреса сторон в приложении сейчас не собираются — в договоре для них оставлены пустые строки, их можно вписать от руки после печати.</div>' : ''}
+      ${d.personal_data && (d.me.is_party || d.live_parties.some((p) => p.user_id === state.me.id)) ? `
       <div class="label">Мои данные для договора</div>
       <form class="card" id="mine" novalidate>
         <label class="label" for="idnp" style="margin-top:0">IDNP</label>
@@ -441,7 +442,7 @@ async function viewContract(id) {
   };
   const sign = app.querySelector('#sign');
   if (sign) sign.onclick = () => {
-    if (!d.me.idnp || !d.me.address) { toast('Сначала заполните IDNP и адрес'); app.querySelector('#idnp').focus(); return; }
+    if (d.personal_data && (!d.me.idnp || !d.me.address)) { toast('Сначала заполните IDNP и адрес'); app.querySelector('#idnp').focus(); return; }
     openSignPad(async (png) => {
       await api('POST', `/api/objects/${id}/contract/sign`, { signature: png, agree: true, version_id: d.version.id });
       delete state.cache[id];
@@ -506,6 +507,27 @@ function viewProfile() {
       <a class="pill" href="#/name" style="margin-top:14px">Изменить имя</a>
       <div class="label">Язык</div>
       ${langSwitch()}
+      ${state.settings.personal_data ? `
+      <div class="label">Мои данные</div>
+      <form class="card" id="pd" novalidate>
+        <label class="label" for="pd_phone" style="margin-top:0">Телефон</label>
+        <input class="field" id="pd_phone" type="tel" inputmode="tel" autocomplete="tel" value="${esc(state.me.phone)}" placeholder="+373 …">
+        <label class="label" for="pd_birth">Дата рождения</label>
+        <input class="field" id="pd_birth" type="date" value="${esc(state.me.birth_date)}">
+        <label class="label" for="pd_idnp">IDNP</label>
+        <input class="field" id="pd_idnp" inputmode="numeric" maxlength="13" value="${esc(state.me.idnp)}" placeholder="13 цифр">
+        <label class="label" for="pd_addr">Адрес проживания (domiciliu)</label>
+        <input class="field" id="pd_addr" autocomplete="street-address" value="${esc(state.me.address)}" placeholder="Город, улица, дом, квартира">
+        <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Данные подставляются в договор и видны только участникам ваших объектов. Заполнять необязательно.</div>
+        <button class="btn ghost sm" style="margin-top:12px;width:100%">Сохранить мои данные</button>
+      </form>` : ''}
+      ${state.me.is_admin ? `
+      <div class="label">Администрирование</div>
+      <div class="card">
+        <div style="font-size:15px;font-weight:500">Ввод личных данных</div>
+        <div class="muted" style="font-size:12px;line-height:1.45;margin-top:4px">Телефон, дата рождения, IDNP и адрес. Когда выключено, поля скрыты у всех, договор подписывается без них, а в тексте остаются пустые строки, чтобы вписать от руки.</div>
+        <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:12px"><button type="button" data-pd="0" class="${state.settings.personal_data ? '' : 'on'}">Выключен</button><button type="button" data-pd="1" class="${state.settings.personal_data ? 'on' : ''}">Включён</button></div>
+      </div>` : ''}
       <div class="card" style="margin-top:24px;font-size:14px;line-height:1.55;color:#B5B5BA">
         Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.
       </div>
@@ -519,6 +541,24 @@ function viewProfile() {
     </div>
     ${tabbar('profile', null)}`;
   bindLang();
+  const pd = app.querySelector('#pd');
+  if (pd) pd.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('PATCH', '/api/me', { phone: app.querySelector('#pd_phone').value, birth_date: app.querySelector('#pd_birth').value, idnp: app.querySelector('#pd_idnp').value, address: app.querySelector('#pd_addr').value });
+      Object.assign(state.me, r.user);
+      toast('Сохранено', true);
+    } catch (ex) { toast(ex.message); }
+  };
+  on('[data-pd]', 'click', async (e) => {
+    const onState = e.currentTarget.dataset.pd === '1';
+    try {
+      const r = await api('PUT', '/api/admin/settings', { personal_data: onState });
+      state.settings = r.settings;
+      toast(onState ? 'Ввод личных данных включён' : 'Ввод личных данных выключен', true);
+      viewProfile();
+    } catch (ex) { toast(ex.message); }
+  });
   const out = app.querySelector('#out');
   if (out) out.onclick = async () => {
     await api('POST', '/api/logout');
@@ -1207,6 +1247,7 @@ function setupTelegram() {
       state.me = j.user;
       state.categories = j.categories;
       state.bot = j.bot;
+      state.settings = j.settings || state.settings;
     }
   } catch { /* офлайн */ }
   if (state.me && state.me.lang) {
