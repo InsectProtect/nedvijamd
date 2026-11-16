@@ -1531,7 +1531,7 @@ route('DELETE', '/api/receipts/:id', async ({ user, params }) => {
     [params.id]
   );
   if (!r) fail(404, 'Чек не найден');
-  await viewAccess(r.object_id, user);
+  await membership(r.object_id, user.id);
   if (Number(r.user_id) !== Number(user.id)) fail(403, 'Удалять можно только свои чеки');
   await db.query('DELETE FROM receipts WHERE id = $1', [params.id]);
   return { ok: true };
@@ -1599,7 +1599,7 @@ async function serveReceipt(req, res, id) {
     [id]
   );
   if (!r) fail(404, 'Чек не найден');
-  await membership(r.object_id, user.id);
+  await viewAccess(r.object_id, user);
   const buf = Buffer.from(r.b64, 'base64');
   res.writeHead(200, { 'Content-Type': r.mime, 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=86400' });
   res.end(buf);
@@ -1616,7 +1616,7 @@ async function serveObjectPhoto(req, res, id) {
   res.end(buf);
 }
 
-require('./market')({ route, db, fail, str, num, tg, appUrl, PUBLIC_URL, fmtEur });
+const market = require('./market')({ route, db, fail, str, num, tg, appUrl, PUBLIC_URL, fmtEur });
 
 async function serveExport(req, res, id, viaLink, lang) {
   if (!viaLink) {
@@ -1775,6 +1775,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(html);
     }
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/receipts\/(\d+)\/image$/))) return await serveReceipt(req, res, m[1]);
+    if (req.method === 'GET' && (m = pathname.match(/^\/api\/market\/photos\/(\d+)\/image$/))) return await market.servePhoto(req, res, m[1], currentUser);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/objects\/(\d+)\/export\.csv$/))) return await serveExport(req, res, m[1]);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/objects\/(\d+)\/photo$/))) return await serveObjectPhoto(req, res, m[1]);
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);

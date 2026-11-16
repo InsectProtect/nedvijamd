@@ -506,6 +506,18 @@
     'Пересчитать выплаты': 'Recalculează plățile',
     'Кому сколько положено': 'Cui cât i se cuvine',
     'Кто сколько заработал': 'Cine cât a câștigat',
+    'До 10 фото. Первое станет обложкой на доске.': 'Până la 10 fotografii. Prima va fi coperta pe panou.',
+    'Удалить это фото?': 'Ștergeți această fotografie?',
+    'Загружаю фото…': 'Încarc fotografiile…',
+    'Сфотографировать объект': 'Fotografiați obiectul',
+    'Комментарии': 'Comentarii',
+    'Задайте вопрос автору или добавьте уточнение — комментарии видят все, кто смотрит сделку.': 'Puneți o întrebare autorului sau adăugați o precizare — comentariile sunt văzute de toți cei care se uită la tranzacție.',
+    'Уточнение к сделке': 'Precizare la tranzacție',
+    'Вопрос или комментарий': 'Întrebare sau comentariu',
+    'Удалить комментарий?': 'Ștergeți comentariul?',
+    'Удалить комментарий': 'Șterge comentariul',
+    'Удалить фото': 'Șterge fotografia',
+    'Фото': 'Fotografie',
     'Режим администратора: только просмотр. Вы не участник этой сделки, изменить ничего нельзя.': 'Mod administrator: doar vizualizare. Nu sunteți participant la această tranzacție, nu puteți modifica nimic.',
     'Все сделки и объекты · проверка': 'Toate tranzacțiile și obiectele · verificare',
     'Все сделки': 'Toate tranzacțiile',
@@ -876,7 +888,8 @@
       if (t !== root.nodeValue) root.nodeValue = t;
       return;
     }
-    if (root.nodeType !== 1 || SKIP.has(root.tagName) || root.closest('[data-nt], .contract')) return;
+    if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE' || root.closest('[data-nt], .contract')) return;
+    if (root.tagName === 'TEXTAREA') { const v = root.getAttribute('placeholder'); if (v) { const t = tr(v); if (t !== v) root.setAttribute('placeholder', t); } return; }
     for (const attr of ['placeholder', 'aria-label', 'title']) {
       const v = root.getAttribute && root.getAttribute(attr);
       if (v) { const t = tr(v); if (t !== v) root.setAttribute(attr, t); }

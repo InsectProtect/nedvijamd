@@ -155,7 +155,7 @@ async function compressImage(file, max = 1600, quality = 0.82) {
 }
 
 // ---------- просмотр чеков на весь экран ----------
-function openViewer(ids, start = 0) {
+function openViewer(ids, start = 0, base = '/api/receipts/') {
   let i = start;
   const v = document.createElement('div');
   v.className = 'viewer';
@@ -166,11 +166,11 @@ function openViewer(ids, start = 0) {
       <div class="top">
         <button class="icon-btn" data-close aria-label="Закрыть">${I.close}</button>
         <div style="font-size:14px;font-weight:500">Чек ${i + 1} из ${ids.length}</div>
-        <a class="icon-btn" href="/api/receipts/${ids[i]}/image" target="_blank" rel="noopener" aria-label="Открыть отдельно">${I.share}</a>
+        <a class="icon-btn" href="${base}${ids[i]}/image" target="_blank" rel="noopener" aria-label="Открыть отдельно">${I.share}</a>
       </div>
-      <div class="stage"><img src="/api/receipts/${ids[i]}/image" alt="Фото чека ${i + 1}"></div>
+      <div class="stage"><img src="${base}${ids[i]}/image" alt="Фото чека ${i + 1}"></div>
       <div class="muted" style="text-align:center;font-size:12px">Двойное касание — увеличить · свайп — следующий</div>
-      <div class="strip">${ids.map((id, k) => `<button class="${k === i ? 'on' : ''}" data-k="${k}" aria-label="Чек ${k + 1}" style="background-image:url('/api/receipts/${id}/image')"></button>`).join('')}</div>`;
+      <div class="strip">${ids.map((id, k) => `<button class="${k === i ? 'on' : ''}" data-k="${k}" aria-label="Чек ${k + 1}" style="background-image:url('${base}${id}/image')"></button>`).join('')}</div>`;
     v.querySelector('[data-close]').onclick = () => v.remove();
     v.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => { i = Number(b.dataset.k); draw(); }));
     const img = v.querySelector('.stage img');
@@ -1721,19 +1721,20 @@ async function viewMarket(tab) {
   state.market = d;
   const myApproved = d.offers.filter((o) => o.mine && o.status === 'approved');
   const offerCard = (o) => `
-    <a class="card" href="#/market/o/${o.id}" style="display:block;margin-top:10px;color:var(--text)">
+    <a class="card" href="#/market/o/${o.id}" style="display:block;margin-top:10px;color:var(--text)${o.photos && o.photos.length ? ';padding-top:0;overflow:hidden' : ''}">
+      ${o.photos && o.photos.length ? `<div class="offer-cover" style="background-image:url('/api/market/photos/${o.photos[0]}/image')">${o.photos.length > 1 ? `<span class="offer-count">${I.gallery} ${o.photos.length}</span>` : ''}</div>` : ''}
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-nt style="font-size:16px;font-weight:600">${esc(o.title)}</span>${o.mine ? offerStatusBadge(o.status) : ''}${o.my_response ? `<span class="badge ${o.my_response === 'accepted' ? 'green' : ''}">${o.my_response === 'accepted' ? 'контакты открыты' : o.my_response === 'declined' ? 'отклонено' : 'вы откликнулись'}</span>` : ''}</div>
       ${o.district ? `<div class="muted" data-nt style="font-size:13px;margin-top:4px">${esc(o.district)}</div>` : ''}
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:12px">
         <div><div class="muted" style="font-size:12px">Нужно от инвестора</div><div class="display num" style="font-size:20px;font-weight:600">${money(o.need_amount)}</div></div>
         <div style="text-align:right">${o.expected_pct !== null ? `<div class="gold num" style="font-size:15px;font-weight:500">≈ ${pct(o.expected_pct)}</div>` : ''}${o.term_months ? `<div class="muted" style="font-size:12px">${o.term_months} ${plural(o.term_months, 'месяц', 'месяца', 'месяцев')}</div>` : ''}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">${avatar(o.user_id, o.author, 'sm')}<span style="font-size:13px">${esc(o.author)}</span><span class="muted" style="font-size:12px;margin-left:auto">${o.mine ? (o.responses ? `откликов: ${o.responses}` : 'откликов пока нет') : dealsLine(o.author_deals)}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">${avatar(o.user_id, o.author, 'sm')}<span data-nt style="font-size:13px">${esc(o.author)}</span>${o.comments ? `<span class="muted" style="font-size:12px">· 💬 ${o.comments}</span>` : ''}<span class="muted" style="font-size:12px;margin-left:auto">${o.mine ? (o.responses ? `откликов: ${o.responses}` : 'откликов пока нет') : dealsLine(o.author_deals)}</span></div>
     </a>`;
   const investorCard = (i) => `
     <div class="card" style="margin-top:10px">
       <div style="display:flex;align-items:center;gap:12px">${avatar(i.user_id, i.name)}
-        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:500">${esc(i.name)}</div><div class="muted" style="font-size:12px">${dealsLine(i.deals)}</div></div>
+        <div style="flex:1;min-width:0"><div data-nt style="font-size:15px;font-weight:500">${esc(i.name)}</div><div class="muted" style="font-size:12px">${dealsLine(i.deals)}</div></div>
         <div class="display num" style="font-weight:600;font-size:16px;white-space:nowrap">${rangeText(i.amount_from, i.amount_to)}</div></div>
       ${i.note ? `<div data-nt style="font-size:13px;line-height:1.45;color:#B5B5BA;margin-top:10px">${esc(i.note)}</div>` : ''}
       ${myApproved.length ? `<button class="btn ghost sm" data-propose="${i.user_id}" style="width:100%;margin-top:12px">Предложить сделку</button>` : ''}
@@ -1831,34 +1832,67 @@ async function viewMarketProfile() {
 async function viewOfferForm(id) {
   let o = {};
   if (id) { o = (await api('GET', `/api/market/offers/${id}`)).offer; if (!o.mine) return go(`#/market/o/${id}`); }
-  app.innerHTML = `
+  const st = { photos: [], existing: o.photos ? [...o.photos] : [] };
+  const fields = ['ttl', 'dst', 'prc', 'need', 'pctv', 'term', 'dsc'];
+  const keep = () => { const v = {}; fields.forEach((f) => { const el = app.querySelector('#' + f); if (el) v[f] = el.value; }); return v; };
+  let vals = { ttl: o.title || '', dst: o.district || '', prc: o.price ?? '', need: o.need_amount ?? '', pctv: o.expected_pct ?? '', term: o.term_months ?? '', dsc: o.description || '' };
+  const draw = () => {
+    app.innerHTML = `
     <div class="screen no-tab">
       <div class="topbar">${backBtn(id ? `#/market/o/${id}` : '#/market', 'Закрыть')}<div class="title"><b>${id ? 'Изменить предложение' : 'Предложить сделку'}</b><small>публикуется после проверки</small></div><div class="spacer44"></div></div>
       <form id="f" novalidate>
-        <label class="label" for="ttl">Объект</label><input class="field" id="ttl" maxlength="120" value="${esc(o.title || '')}" placeholder="Например: 2 комнаты под ремонт и продажу">
-        <label class="label" for="dst">Район, город</label><input class="field" id="dst" maxlength="120" value="${esc(o.district || '')}" placeholder="Ботаника, Кишинёв">
+        <span class="label">Фото объекта</span>
+        <div class="thumbs">
+          ${st.existing.map((pid) => `<div class="thumb" style="background-image:url('/api/market/photos/${pid}/image')"><button type="button" class="x" data-rmx="${pid}" aria-label="Удалить фото">×</button></div>`).join('')}
+          ${st.photos.map((p, k) => `<div class="thumb" style="background-image:url('${p.preview}')"><button type="button" class="x" data-rm="${k}" aria-label="Убрать фото">×</button></div>`).join('')}
+          ${st.existing.length + st.photos.length < 10 ? `<label class="add-tile">${I.camera}<span>Камера</span><input type="file" accept="image/*" capture="environment" data-ph aria-label="Сфотографировать объект"></label>
+          <label class="add-tile">${I.gallery}<span>Галерея</span><input type="file" accept="image/*" multiple data-ph aria-label="Загрузить фото из галереи"></label>` : ''}
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:6px">До 10 фото. Первое станет обложкой на доске.</div>
+        <label class="label" for="ttl">Объект</label><input class="field" id="ttl" maxlength="120" value="${esc(vals.ttl)}" placeholder="Например: 2 комнаты под ремонт и продажу">
+        <label class="label" for="dst">Район, город</label><input class="field" id="dst" maxlength="120" value="${esc(vals.dst)}" placeholder="Ботаника, Кишинёв">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div><label class="label" for="prc">Цена объекта, €</label><input class="field" id="prc" inputmode="numeric" value="${esc(o.price ?? '')}"></div>
-          <div><label class="label" for="need">Нужно от инвестора, €</label><input class="field" id="need" inputmode="numeric" value="${esc(o.need_amount ?? '')}"></div>
-          <div><label class="label" for="pctv">Ожидаемая доходность, %</label><input class="field" id="pctv" inputmode="decimal" value="${esc(o.expected_pct ?? '')}"></div>
-          <div><label class="label" for="term">Срок, месяцев</label><input class="field" id="term" inputmode="numeric" value="${esc(o.term_months ?? '')}"></div>
+          <div><label class="label" for="prc">Цена объекта, €</label><input class="field" id="prc" inputmode="numeric" value="${esc(vals.prc)}"></div>
+          <div><label class="label" for="need">Нужно от инвестора, €</label><input class="field" id="need" inputmode="numeric" value="${esc(vals.need)}"></div>
+          <div><label class="label" for="pctv">Ожидаемая доходность, %</label><input class="field" id="pctv" inputmode="decimal" value="${esc(vals.pctv)}"></div>
+          <div><label class="label" for="term">Срок, месяцев</label><input class="field" id="term" inputmode="numeric" value="${esc(vals.term)}"></div>
         </div>
         <label class="label" for="dsc">Описание</label>
-        <textarea class="field" id="dsc" maxlength="2000" rows="5" style="height:auto;padding-top:12px;line-height:1.45" placeholder="Что за объект, план: покупка, ремонт, продажа или аренда; кто ведёт ремонт; как делится прибыль">${esc(o.description || '')}</textarea>
+        <textarea class="field" id="dsc" maxlength="2000" rows="5" style="height:auto;padding-top:12px;line-height:1.45" placeholder="Что за объект, план: покупка, ремонт, продажа или аренда; кто ведёт ремонт; как делится прибыль">${esc(vals.dsc)}</textarea>
         <div class="card dashed" style="margin-top:14px;font-size:12px;line-height:1.5;color:#B5B5BA">Предложение увидят все пользователи Доли после проверки администратором. Ваши контакты откроются только тому инвестору, чей отклик вы примете. Доходность — ваш прогноз, а не гарантия.</div>
-        <button class="btn" style="margin-top:18px">${id ? 'Сохранить и отправить на проверку' : 'Отправить на проверку'}</button>
+        <button class="btn" id="save" style="margin-top:18px">${id ? 'Сохранить и отправить на проверку' : 'Отправить на проверку'}</button>
       </form>
     </div>`;
-  const v = (s) => app.querySelector(s).value.replace(/\s/g, '').replace(',', '.');
-  app.querySelector('#f').onsubmit = async (e) => {
-    e.preventDefault();
-    const body = { title: app.querySelector('#ttl').value, district: app.querySelector('#dst').value, description: app.querySelector('#dsc').value, price: v('#prc'), need_amount: v('#need'), expected_pct: v('#pctv'), term_months: v('#term') };
-    try {
-      const r = id ? await api('PUT', `/api/market/offers/${id}`, body) : await api('POST', '/api/market/offers', body);
-      toast('Отправлено на проверку', true);
-      go(`#/market/o/${id || r.id}`);
-    } catch (ex) { toast(ex.message); }
+    on('[data-ph]', 'change', async (e) => {
+      vals = keep();
+      const files = Array.from(e.target.files || []).slice(0, 10 - st.existing.length - st.photos.length);
+      for (const f of files) { try { st.photos.push(await compressImage(f, 1600, 0.8)); } catch (ex) { toast(ex.message); } }
+      draw();
+    });
+    on('[data-rm]', 'click', (e) => { vals = keep(); st.photos.splice(Number(e.currentTarget.dataset.rm), 1); draw(); });
+    on('[data-rmx]', 'click', async (e) => {
+      if (!ask('Удалить это фото?')) return;
+      vals = keep();
+      const pid = Number(e.currentTarget.dataset.rmx);
+      try { await api('DELETE', `/api/market/photos/${pid}`); st.existing = st.existing.filter((x) => x !== pid); draw(); } catch (ex) { toast(ex.message); }
+    });
+    const v = (sel) => app.querySelector(sel).value.replace(/\s/g, '').replace(',', '.');
+    app.querySelector('#f').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = app.querySelector('#save'); btn.disabled = true;
+      const body = { title: app.querySelector('#ttl').value, district: app.querySelector('#dst').value, description: app.querySelector('#dsc').value, price: v('#prc'), need_amount: v('#need'), expected_pct: v('#pctv'), term_months: v('#term') };
+      const photos = st.photos.map((p) => ({ mime: p.mime, data: p.data }));
+      try {
+        if (photos.length) toast('Загружаю фото…', true);
+        let oid = id;
+        if (id) { await api('PUT', `/api/market/offers/${id}`, body); if (photos.length) await api('POST', `/api/market/offers/${id}/photos`, { photos }); }
+        else oid = (await api('POST', '/api/market/offers', { ...body, photos })).id;
+        toast('Отправлено на проверку', true);
+        go(`#/market/o/${oid}`);
+      } catch (ex) { toast(ex.message); btn.disabled = false; }
+    };
   };
+  draw();
 }
 
 async function viewOffer(id) {
@@ -1867,7 +1901,7 @@ async function viewOffer(id) {
   const respRow = (r) => `
     <div class="card" style="margin-top:10px">
       <div style="display:flex;align-items:center;gap:12px">${avatar(r.investor_id, r.name)}
-        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:500">${esc(r.name)}</div>
+        <div style="flex:1;min-width:0"><div data-nt style="font-size:15px;font-weight:500">${esc(r.name)}</div>
         <div class="muted" style="font-size:12px">${r.initiator === 'owner' ? 'вы предложили' : 'отклик'} · ${dateRu(String(r.created_at).slice(0, 10))}${r.amount_to ? ` · ${rangeText(r.amount_from, r.amount_to)}` : ''}</div>
         <div class="muted" style="font-size:12px">${dealsLine(r.deals)}</div></div>
         <span class="badge ${r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'}">${r.status === 'accepted' ? 'принят' : r.status === 'declined' ? 'отклонён' : 'ждёт ответа'}</span></div>
@@ -1878,6 +1912,7 @@ async function viewOffer(id) {
   app.innerHTML = `
     <div class="screen no-tab">
       <div class="topbar">${backBtn('#/market')}<div class="spacer44"></div></div>
+      ${o.photos.length ? `<div class="offer-gallery">${o.photos.map((pid, k) => `<button data-gal="${k}" style="background-image:url('/api/market/photos/${pid}/image')" aria-label="Фото ${k + 1}"></button>`).join('')}</div>` : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">${o.mine ? offerStatusBadge(o.status) : ''}</div>
       <h1 class="h" data-nt style="margin-top:8px">${esc(o.title)}</h1>
       ${o.district ? `<div class="h-sub" data-nt style="margin-top:4px">${esc(o.district)}</div>` : ''}
@@ -1890,7 +1925,7 @@ async function viewOffer(id) {
       </div>
       ${o.price ? `<div class="muted" style="font-size:13px;margin-top:10px">Цена объекта: <span class="num" style="color:var(--text)">${money(o.price)}</span></div>` : ''}
       ${o.description ? `<div class="card" data-nt style="margin-top:14px;font-size:14px;line-height:1.55;white-space:pre-wrap">${esc(o.description)}</div>` : ''}
-      <div class="card" style="display:flex;align-items:center;gap:12px;margin-top:12px">${avatar(o.user_id, o.author)}<div><div style="font-size:15px;font-weight:500">${esc(o.author)}${o.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="muted" style="font-size:12px">${dealsLine(o.author_deals)}</div></div></div>
+      <div class="card" style="display:flex;align-items:center;gap:12px;margin-top:12px">${avatar(o.user_id, o.author)}<div><div style="font-size:15px;font-weight:500"><span data-nt>${esc(o.author)}</span>${o.mine ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div><div class="muted" style="font-size:12px">${dealsLine(o.author_deals)}</div></div></div>
       ${o.mine ? `
         <div class="label" style="display:flex;justify-content:space-between"><span>Отклики инвесторов</span><span>${o.responses.length}</span></div>
         ${o.responses.length ? o.responses.map(respRow).join('') : '<div class="card empty">Пока откликов нет. Можно самому предложить сделку инвестору во вкладке «Инвесторы».</div>'}
@@ -1908,9 +1943,28 @@ async function viewOffer(id) {
         <label class="label" for="rmsg">Сообщение автору (необязательно)</label><input class="field" id="rmsg" maxlength="500" placeholder="Например: готов вложить 20 000 €">
         <button class="btn" id="respond" style="margin-top:14px">Интересно — откликнуться</button>
         <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px;text-align:center">Автор получит уведомление. Если он примет отклик, вы оба увидите контакты друг друга.</div>` : ''}
+      <div class="label" style="display:flex;justify-content:space-between"><span>Комментарии</span><span>${o.comments.length}</span></div>
+      ${o.comments.length ? `<div class="card list">${o.comments.map((c) => `<div class="row" style="align-items:flex-start">${avatar(c.user_id, c.name, 'sm')}
+        <div class="grow"><div class="s" style="margin:0"><span data-nt>${esc(c.name)}</span>${c.is_author ? ' <span class="badge gold">автор</span>' : ''} · ${dateRu(String(c.created_at).slice(0, 10))}</div>
+        <div data-nt style="font-size:14px;line-height:1.45;margin-top:4px;white-space:pre-wrap;word-break:break-word">${esc(c.text)}</div></div>
+        ${c.can_delete ? `<button class="link-btn" data-cdel="${c.id}" aria-label="Удалить комментарий" style="color:var(--muted);font-size:18px;padding:0 4px">×</button>` : ''}</div>`).join('')}</div>` : '<div class="muted" style="font-size:13px">Задайте вопрос автору или добавьте уточнение — комментарии видят все, кто смотрит сделку.</div>'}
+      ${o.status !== 'closed' && (o.status === 'approved' || o.mine) ? `<div style="display:flex;gap:8px;margin-top:10px"><textarea class="field" id="ctext" rows="1" maxlength="1000" placeholder="${o.mine ? 'Уточнение к сделке' : 'Вопрос или комментарий'}" style="flex:1;height:auto;min-height:48px;padding-top:13px;line-height:1.4;resize:none"></textarea><button class="btn sm" id="csend" style="flex:none;padding:0 18px;height:48px">Отправить</button></div>` : ''}
       ${state.me.is_admin && o.status === 'pending' ? `<div class="label">Проверка</div><div class="btn-row"><button class="btn sm" data-mod="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-mod="0" style="flex:1">Отклонить</button></div>` : ''}
     </div>`;
   bindExt();
+  on('[data-gal]', 'click', (e) => openViewer(o.photos, Number(e.currentTarget.dataset.gal), '/api/market/photos/'));
+  const ct = app.querySelector('#ctext');
+  if (ct) ct.addEventListener('input', () => { ct.style.height = 'auto'; ct.style.height = Math.min(ct.scrollHeight, 160) + 'px'; });
+  const cs = app.querySelector('#csend');
+  if (cs) cs.onclick = async () => {
+    const text = ct.value.trim(); if (!text) return;
+    cs.disabled = true;
+    try { await api('POST', `/api/market/offers/${id}/comments`, { text }); await viewOffer(id); const l = app.querySelector('#ctext'); if (l) l.scrollIntoView({ block: 'center' }); } catch (ex) { toast(ex.message); cs.disabled = false; }
+  };
+  on('[data-cdel]', 'click', async (e) => {
+    if (!ask('Удалить комментарий?')) return;
+    try { await api('DELETE', `/api/market/comments/${e.currentTarget.dataset.cdel}`); viewOffer(id); } catch (ex) { toast(ex.message); }
+  });
   const rb = app.querySelector('#respond');
   if (rb) rb.onclick = async () => {
     const msg = app.querySelector('#rmsg');
@@ -1961,7 +2015,7 @@ async function viewMarketAdmin() {
         <div class="btn-row" style="margin-top:12px"><button class="btn sm" data-k="offer" data-id="${o.id}" data-ok="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-k="offer" data-id="${o.id}" data-ok="0" style="flex:1">Отклонить</button></div></div>`).join('') : '<div class="card empty">Нет новых предложений.</div>'}
       <div class="label">Анкеты инвесторов · ${d.profiles.length}</div>
       ${d.profiles.length ? d.profiles.map((p) => `<div class="card" style="margin-top:10px">
-        <div style="display:flex;align-items:center;gap:12px">${avatar(p.user_id, p.name)}<div style="flex:1"><div style="font-size:15px;font-weight:500">${esc(p.name)}</div><div class="muted" style="font-size:12px">${dealsLine(p.deals)}</div></div><b class="num">${rangeText(p.amount_from, p.amount_to)}</b></div>
+        <div style="display:flex;align-items:center;gap:12px">${avatar(p.user_id, p.name)}<div style="flex:1"><div data-nt style="font-size:15px;font-weight:500">${esc(p.name)}</div><div class="muted" style="font-size:12px">${dealsLine(p.deals)}</div></div><b class="num">${rangeText(p.amount_from, p.amount_to)}</b></div>
         ${p.note ? `<div data-nt style="font-size:13px;color:#B5B5BA;margin-top:8px">${esc(p.note)}</div>` : ''}
         <div class="btn-row" style="margin-top:12px"><button class="btn sm" data-k="profile" data-id="${p.user_id}" data-ok="1" style="flex:1">Опубликовать</button><button class="btn ghost sm" data-k="profile" data-id="${p.user_id}" data-ok="0" style="flex:1">Отклонить</button></div></div>`).join('') : '<div class="card empty">Нет новых анкет.</div>'}
     </div>`;

@@ -276,3 +276,19 @@ CREATE TABLE IF NOT EXISTS admin_views (
   object_id INT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
   viewed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Фото и комментарии к предложениям сделок
+CREATE TABLE IF NOT EXISTS market_photos (
+  id SERIAL PRIMARY KEY,
+  offer_id INT NOT NULL REFERENCES market_offers(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS market_comments (
+  id SERIAL PRIMARY KEY,
+  offer_id INT NOT NULL REFERENCES market_offers(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

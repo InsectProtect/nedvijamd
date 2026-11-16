@@ -4,7 +4,7 @@ const { execSync } = require('child_process');
 const G = execSync('npm root -g').toString().trim();
 const { chromium } = require(path.join(G, 'playwright'));
 const BASE = 'http://localhost:3999';
-const NAMES = /Админ|Главный|Олег|Автор|Ирина|Инвестор|Ботаника|Рышкановка|Готова|Кишин|2 комнаты|Покупка/;
+const NAMES = /Админ|Главный|Олег|Автор|Ирина|Инвестор|Ботаника|Рышкановка|Готова|Какой этаж|Кишин|2 комнаты|Покупка/;
 (async () => {
   const b = await chromium.launch();
   const found = new Map();
@@ -34,6 +34,7 @@ const NAMES = /Админ|Главный|Олег|Автор|Ирина|Инве
   await inv.fill('#afrom', '20000'); await inv.fill('#ato', '50 000'); await inv.fill('#anote', 'Кишинёв'); await inv.click('#f .btn'); await inv.waitForSelector('.seg'); await scan(inv, 'investors-pending');
   // Автор: предложение
   await own.goto(BASE + '/#/market/new'); await own.waitForSelector('#ttl');
+  await own.setInputFiles('input[data-ph][multiple]', ['/tmp/flat0.jpg', '/tmp/flat1.jpg']); await own.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
   await own.fill('#ttl', '2 комнаты под ремонт'); await own.fill('#dst', 'Ботаника'); await own.fill('#prc', '62000'); await own.fill('#need', '30000'); await own.fill('#pctv', '22'); await own.fill('#term', '8'); await own.fill('#dsc', 'Покупка, ремонт за 3 месяца, продажа.');
   await own.click('#f .btn'); await own.waitForSelector('h1.h'); await own.screenshot({ path: '/tmp/m-offer-pending.png', fullPage: true });
   // Админ: проверка
@@ -44,6 +45,9 @@ const NAMES = /Админ|Главный|Олег|Автор|Ирина|Инве
   await inv.goto(BASE + '/#/market'); await inv.reload(); await inv.waitForSelector('a[href^="#/market/o/"]'); await scan(inv, 'market-deals');
   await inv.screenshot({ path: '/tmp/m-market-ro.png', fullPage: true });
   await inv.click('a[href^="#/market/o/"]'); await inv.waitForSelector('#respond'); await scan(inv, 'offer');
+  await inv.fill('#ctext', 'Какой этаж?'); await inv.click('#csend'); await inv.waitForSelector('[data-cdel]'); await scan(inv, 'offer-commented');
+  await inv.screenshot({ path: '/tmp/m-offer-photos.png', fullPage: true });
+  await inv.click('[data-gal="1"]'); await inv.waitForSelector('.viewer img'); await inv.screenshot({ path: '/tmp/m-viewer.png' }); await inv.keyboard.press('Escape'); await inv.goto(inv.url()); await inv.reload(); await inv.waitForSelector('#respond');
   await inv.fill('#rmsg', 'Готова 30 000'); await inv.click('#respond'); await inv.waitForTimeout(700); await scan(inv, 'offer-responded');
   // Автор видит инвестора и отклик
   await own.goto(BASE + '/#/market/investors'); await own.reload(); await own.waitForTimeout(1000); await own.screenshot({ path: '/tmp/m-dbg.png', fullPage: true }); await own.waitForSelector('[data-propose]');

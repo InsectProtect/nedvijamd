@@ -81,6 +81,100 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     created_at: o.created_at
   });
 
+  // ---------- фото предложений ----------
+  const MAX_PHOTO = 8 * 1024 * 1024;
+  async function savePhotos(offerId, photos) {
+    if (!Array.isArray(photos) || !photos.length) return 0;
+    const have = await db.one('SELECT COUNT(*)::int AS n FROM market_photos WHERE offer_id = $1', [offerId]);
+    const room = Math.max(0, 10 - have.n);
+    if (!room) fail(400, 'Не больше 10 фото');
+    let saved = 0;
+    for (const p of photos.slice(0, room)) {
+      const mime = /^image\/(jpeg|png|webp)$/.test(p && p.mime) ? p.mime : null;
+      if (!mime || typeof p.data !== 'string') fail(400, 'Неподдерживаемый формат фото');
+      const buf = Buffer.from(p.data, 'base64');
+      if (!buf.length || buf.length > MAX_PHOTO) fail(400, 'Фото слишком большое');
+      await db.query(`INSERT INTO market_photos (offer_id, mime, data) VALUES ($1, $2, decode($3, 'base64'))`, [offerId, mime, buf.toString('base64')]);
+      saved++;
+    }
+    return saved;
+  }
+  async function photoIds(offerIds) {
+    if (!offerIds.length) return {};
+    const rows = await db.query(`SELECT id, offer_id FROM market_photos WHERE offer_id IN (${offerIds.map((x) => Number(x) | 0).join(',')}) ORDER BY id`);
+    const out = {};
+    for (const r of rows) (out[Number(r.offer_id)] = out[Number(r.offer_id)] || []).push(Number(r.id));
+    return out;
+  }
+  const canSee = (o, user) => o.status === 'approved' || Number(o.user_id) === Number(user.id) || user.is_admin;
+
+  // Картинка отдаётся напрямую (не JSON)
+  async function servePhoto(req, res, id, currentUser) {
+    const user = await currentUser(req);
+    if (!user) fail(401, 'Нужно войти');
+    const r = await db.one(
+      `SELECT p.mime, encode(p.data, 'base64') AS b64, o.status, o.user_id FROM market_photos p JOIN market_offers o ON o.id = p.offer_id WHERE p.id = $1`,
+      [id]
+    );
+    if (!r || !canSee(r, user)) fail(404, 'Фото не найдено');
+    const buf = Buffer.from(r.b64, 'base64');
+    res.writeHead(200, { 'Content-Type': r.mime, 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=86400' });
+    res.end(buf);
+  }
+
+  route('POST', '/api/market/offers/:id/photos', async ({ user, params, body }) => {
+    const o = await loadOffer(params.id);
+    if (Number(o.user_id) !== Number(user.id)) fail(403, 'Фото добавляет только автор');
+    if (o.status === 'closed') fail(400, 'Предложение снято');
+    const n = await savePhotos(o.id, body.photos);
+    // Новые фото проходят проверку
+    if (n && o.status === 'approved') {
+      await db.query(`UPDATE market_offers SET status = 'pending', updated_at = now() WHERE id = $1`, [o.id]);
+      notifyAdmins((lang) => lang === 'ro' ? `🖼 Fotografii noi în oferta «${tg.escHtml(o.title)}» — verificați.` : `🖼 Новые фото в предложении «${tg.escHtml(o.title)}» — нужна проверка.`);
+    }
+    return { ok: true, added: n };
+  });
+  route('DELETE', '/api/market/photos/:id', async ({ user, params }) => {
+    const r = await db.one('SELECT p.id, o.user_id FROM market_photos p JOIN market_offers o ON o.id = p.offer_id WHERE p.id = $1', [params.id]);
+    if (!r) fail(404, 'Фото не найдено');
+    if (Number(r.user_id) !== Number(user.id) && !user.is_admin) fail(403, 'Удалить может только автор');
+    await db.query('DELETE FROM market_photos WHERE id = $1', [r.id]);
+    return { ok: true };
+  });
+
+  // ---------- комментарии к сделке ----------
+  route('POST', '/api/market/offers/:id/comments', async ({ user, params, body }) => {
+    const o = await loadOffer(params.id);
+    if (!canSee(o, user)) fail(404, 'Предложение не найдено');
+    if (o.status === 'closed') fail(400, 'Предложение снято');
+    const text = str(body.text, 1000);
+    if (!text) fail(400, 'Напишите комментарий');
+    const recent = await db.one(`SELECT COUNT(*)::int AS n FROM market_comments WHERE user_id = $1 AND created_at > now() - interval '1 minute'`, [user.id]);
+    if (recent.n >= 5) fail(429, 'Слишком часто, подождите минуту');
+    await db.query('INSERT INTO market_comments (offer_id, user_id, text) VALUES ($1, $2, $3)', [o.id, user.id, text]);
+    const short = tg.escHtml(text.length > 200 ? text.slice(0, 200) + '…' : text);
+    const title = tg.escHtml(o.title);
+    const name = tg.escHtml(user.name);
+    if (Number(o.user_id) !== Number(user.id)) {
+      notifyUser(o.user_id, (lang) => lang === 'ro'
+        ? `💬 ${name} a comentat oferta «${title}»:\n${short}`
+        : `💬 ${name} прокомментировал(а) ваше предложение «${title}»:\n${short}`, `/market/o/${o.id}`);
+    } else {
+      const others = await db.query('SELECT DISTINCT user_id FROM market_comments WHERE offer_id = $1 AND user_id <> $2', [o.id, user.id]);
+      for (const x of others) notifyUser(x.user_id, (lang) => lang === 'ro'
+        ? `💬 Autorul ofertei «${title}» a răspuns:\n${short}`
+        : `💬 Автор предложения «${title}» ответил:\n${short}`, `/market/o/${o.id}`);
+    }
+    return { ok: true };
+  });
+  route('DELETE', '/api/market/comments/:id', async ({ user, params }) => {
+    const c = await db.one('SELECT id, user_id FROM market_comments WHERE id = $1', [params.id]);
+    if (!c) fail(404, 'Комментарий не найден');
+    if (Number(c.user_id) !== Number(user.id) && !user.is_admin) fail(403, 'Удалить можно только свой комментарий');
+    await db.query('DELETE FROM market_comments WHERE id = $1', [c.id]);
+    return { ok: true };
+  });
+
   // ---------- главная доски ----------
   route('GET', '/api/market', async ({ user }) => {
     const offers = await db.query(
@@ -112,6 +206,9 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
       moderation = Number(p.n);
     }
     const myProfile = investors.find((i) => Number(i.user_id) === Number(user.id)) || null;
+    const pics = await photoIds(offers.map((o) => o.id));
+    const ccount = offers.length ? await db.query(`SELECT offer_id, COUNT(*)::int AS n FROM market_comments WHERE offer_id IN (${offers.map((o) => Number(o.id) | 0).join(',')}) GROUP BY offer_id`) : [];
+    const cmap = Object.fromEntries(ccount.map((r) => [Number(r.offer_id), Number(r.n)]));
     return {
       offers: offers.filter((o) => o.status !== 'closed' || Number(o.user_id) === Number(user.id)).map((o) => {
         const out = offerOut(o, closed);
@@ -119,6 +216,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
         const r = mine.find((x) => Number(x.offer_id) === o.id && Number(x.investor_id) === Number(user.id));
         out.my_response = r ? r.status : null;
         out.responses = mine.filter((x) => Number(x.offer_id) === o.id).length;
+        out.photos = pics[o.id] || [];
+        out.comments = cmap[o.id] || 0;
         return out;
       }),
       investors: investors.filter((i) => i.status === 'approved' && Number(i.user_id) !== Number(user.id)).map((i) => ({
@@ -177,6 +276,7 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [user.id, f.title, f.district, f.description, f.price, f.need, f.pct, f.term]
     );
+    await savePhotos(o.id, body.photos);
     notifyAdmins((lang) => lang === 'ro'
       ? `🆕 Ofertă spre verificare: <b>${tg.escHtml(f.title)}</b> de la ${tg.escHtml(user.name)}, necesar ${fmtEur(f.need)}.`
       : `🆕 Предложение на проверку: <b>${tg.escHtml(f.title)}</b> от ${tg.escHtml(user.name)}, нужно ${fmtEur(f.need)}.`);
@@ -220,6 +320,13 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     const closed = await dealsClosed([Number(o.user_id)]);
     const out = offerOut(o, closed);
     out.mine = mine;
+    out.photos = (await photoIds([o.id]))[o.id] || [];
+    const cm = await db.query(
+      `SELECT c.id, c.user_id, c.text, c.created_at, u.name FROM market_comments c JOIN users u ON u.id = c.user_id WHERE c.offer_id = $1 ORDER BY c.created_at`,
+      [o.id]
+    );
+    out.comments = cm.map((c) => ({ id: c.id, user_id: Number(c.user_id), name: c.name, text: c.text, created_at: c.created_at,
+      is_author: Number(c.user_id) === Number(o.user_id), can_delete: Number(c.user_id) === Number(user.id) || !!user.is_admin }));
     const rows = await db.query(
       `SELECT r.*, u.name, ip.amount_from, ip.amount_to, ip.status AS profile_status FROM market_responses r
        JOIN users u ON u.id = r.investor_id LEFT JOIN investor_profiles ip ON ip.user_id = r.investor_id
@@ -381,4 +488,5 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     } else fail(404, 'Не найдено');
     return { ok: true };
   });
+  return { servePhoto };
 };
