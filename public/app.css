@@ -9,6 +9,9 @@
   --gold: #D4BF94;
   --gold-bg: #1A1813;
   --gold-line: #4A4234;
+  --attn: #F0A54A;
+  --attn-bg: #22190D;
+  --attn-line: #5A4220;
   --blue: #6F8AB0;
   --green: #7BA894;
   --red: #E08A7A;
@@ -53,7 +56,8 @@ h1.h { font-family: Manrope, sans-serif; font-weight: 600; font-size: 28px; lett
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .card + .card { margin-top: 10px; }
-.card.gold { background: var(--gold-bg); border-color: var(--gold-line); color: var(--text); }
+/* Цвета: золото — бренд и главное действие; зелёный — полученные деньги и согласие; красный — потери; янтарь — нужно ваше действие */
+.card.gold { background: var(--attn-bg); border-color: var(--attn-line); color: var(--text); }
 .card.dashed { background: transparent; border: 1px dashed #3A3A40; }
 .card.list { padding: 0 16px; }
 .row { display: flex; align-items: center; gap: 12px; padding: 13px 0; }
@@ -67,7 +71,8 @@ a.row { color: var(--text); }
 .hero-label { color: var(--muted); font-size: 13px; margin-top: 24px; }
 .hero-num { font-family: Manrope, sans-serif; font-weight: 600; font-size: 44px; letter-spacing: -0.035em; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .hero-num .cur { color: var(--muted); font-weight: 500; }
-.chip { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 12px; border-radius: 12px; background: var(--gold-bg); border: 1px solid var(--gold-line); font-size: 13px; color: var(--gold); }
+.chip { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 12px; border-radius: 12px; background: #17171A; border: 1px solid var(--line2); font-size: 13px; color: #D9D9DE; }
+.chip.earned { background: #13241A; border-color: #2E6B45; color: #8FC9A3; }
 .chip svg { width: 14px; height: 14px; }
 
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; }
@@ -81,7 +86,8 @@ a.row { color: var(--text); }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 7px; background: #23232A; color: #C9C9CE; white-space: nowrap; }
 .badge.ремонт { background: #1C2A24; color: #8DBBA5; }
 .badge.сдаётся { background: #1C2433; color: #9DB3D3; }
-.badge.продаётся, .badge.gold { background: #2A261D; color: var(--gold); }
+.badge.продаётся, .badge.brand { background: #2A261D; color: var(--gold); }
+.badge.gold { background: var(--attn-bg); color: var(--attn); }
 .badge.продана { background: #23232A; color: var(--muted); }
 .badge.red { background: #2A1B19; color: var(--red); }
 
@@ -239,3 +245,7 @@ a.act { text-decoration: none; }
 .payer { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 10px 12px; border-radius: 14px; background: #141416; font-size: 13px; color: #B5B5BA; line-height: 1.35; }
 .payer .avatar { flex: none; }
 .sticky-cta { position: sticky; bottom: 0; margin: 24px -20px 0; padding: 14px 20px calc(14px + var(--safe-b)); background: linear-gradient(to bottom, rgba(13,13,14,0), #0D0D0E 30%); z-index: 5; }
+
+.fc { color: #E6E6EA; }
+.pill { color: var(--text); }
+.pill svg { color: var(--gold); }

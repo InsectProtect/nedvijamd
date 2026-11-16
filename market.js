@@ -125,12 +125,12 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
   route('POST', '/api/market/offers/:id/photos', async ({ user, params, body }) => {
     const o = await loadOffer(params.id);
     if (Number(o.user_id) !== Number(user.id)) fail(403, 'Фото добавляет только автор');
-    if (o.status === 'closed') fail(400, 'Предложение снято');
+    if (o.status === 'closed') fail(400, 'Объявление снято');
     const n = await savePhotos(o.id, body.photos);
     // Новые фото проходят проверку
     if (n && o.status === 'approved') {
       await db.query(`UPDATE market_offers SET status = 'pending', updated_at = now() WHERE id = $1`, [o.id]);
-      notifyAdmins((lang) => lang === 'ro' ? `🖼 Fotografii noi în oferta «${tg.escHtml(o.title)}» — verificați.` : `🖼 Новые фото в предложении «${tg.escHtml(o.title)}» — нужна проверка.`);
+      notifyAdmins((lang) => lang === 'ro' ? `🖼 Fotografii noi în anunțul «${tg.escHtml(o.title)}» — verificați.` : `🖼 Новые фото в объявлении «${tg.escHtml(o.title)}» — нужна проверка.`);
     }
     return { ok: true, added: n };
   });
@@ -145,8 +145,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
   // ---------- комментарии к сделке ----------
   route('POST', '/api/market/offers/:id/comments', async ({ user, params, body }) => {
     const o = await loadOffer(params.id);
-    if (!canSee(o, user)) fail(404, 'Предложение не найдено');
-    if (o.status === 'closed') fail(400, 'Предложение снято');
+    if (!canSee(o, user)) fail(404, 'Объявление не найдено');
+    if (o.status === 'closed') fail(400, 'Объявление снято');
     const text = str(body.text, 1000);
     if (!text) fail(400, 'Напишите комментарий');
     const recent = await db.one(`SELECT COUNT(*)::int AS n FROM market_comments WHERE user_id = $1 AND created_at > now() - interval '1 minute'`, [user.id]);
@@ -157,13 +157,13 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     const name = tg.escHtml(user.name);
     if (Number(o.user_id) !== Number(user.id)) {
       notifyUser(o.user_id, (lang) => lang === 'ro'
-        ? `💬 ${name} a comentat oferta «${title}»:\n${short}`
-        : `💬 ${name} прокомментировал(а) ваше предложение «${title}»:\n${short}`, `/market/o/${o.id}`);
+        ? `💬 ${name} a comentat anunțul «${title}»:\n${short}`
+        : `💬 ${name} прокомментировал(а) ваше объявление «${title}»:\n${short}`, `/market/o/${o.id}`);
     } else {
       const others = await db.query('SELECT DISTINCT user_id FROM market_comments WHERE offer_id = $1 AND user_id <> $2', [o.id, user.id]);
       for (const x of others) notifyUser(x.user_id, (lang) => lang === 'ro'
-        ? `💬 Autorul ofertei «${title}» a răspuns:\n${short}`
-        : `💬 Автор предложения «${title}» ответил:\n${short}`, `/market/o/${o.id}`);
+        ? `💬 Autorul anunțului «${title}» a răspuns:\n${short}`
+        : `💬 Автор объявления «${title}» ответил:\n${short}`, `/market/o/${o.id}`);
     }
     return { ok: true };
   });
@@ -270,7 +270,7 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
   route('POST', '/api/market/offers', async ({ user, body }) => {
     const f = offerFields(body);
     const open = await db.one(`SELECT COUNT(*)::int AS n FROM market_offers WHERE user_id = $1 AND status IN ('pending', 'approved')`, [user.id]);
-    if (open.n >= 10) fail(400, 'Не больше 10 активных предложений');
+    if (open.n >= 10) fail(400, 'Не больше 10 активных объявлений');
     const o = await db.one(
       `INSERT INTO market_offers (user_id, title, district, description, price, need_amount, expected_pct, term_months)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
@@ -278,21 +278,21 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     );
     await savePhotos(o.id, body.photos);
     notifyAdmins((lang) => lang === 'ro'
-      ? `🆕 Ofertă spre verificare: <b>${tg.escHtml(f.title)}</b> de la ${tg.escHtml(user.name)}, necesar ${fmtEur(f.need)}.`
-      : `🆕 Предложение на проверку: <b>${tg.escHtml(f.title)}</b> от ${tg.escHtml(user.name)}, нужно ${fmtEur(f.need)}.`);
+      ? `🆕 Anunț spre verificare: <b>${tg.escHtml(f.title)}</b> de la ${tg.escHtml(user.name)}, necesar ${fmtEur(f.need)}.`
+      : `🆕 Объявление на проверку: <b>${tg.escHtml(f.title)}</b> от ${tg.escHtml(user.name)}, нужно ${fmtEur(f.need)}.`);
     return { id: o.id };
   });
 
   async function loadOffer(id) {
     const o = await db.one('SELECT mo.*, u.name AS author FROM market_offers mo JOIN users u ON u.id = mo.user_id WHERE mo.id = $1', [id]);
-    if (!o) fail(404, 'Предложение не найдено');
+    if (!o) fail(404, 'Объявление не найдено');
     return o;
   }
 
   route('PUT', '/api/market/offers/:id', async ({ user, params, body }) => {
     const o = await loadOffer(params.id);
     if (Number(o.user_id) !== Number(user.id)) fail(403, 'Изменить может только автор');
-    if (o.status === 'closed') fail(400, 'Предложение снято');
+    if (o.status === 'closed') fail(400, 'Объявление снято');
     const f = offerFields(body);
     await db.query(
       `UPDATE market_offers SET title = $1, district = $2, description = $3, price = $4, need_amount = $5, expected_pct = $6, term_months = $7,
@@ -300,8 +300,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
       [f.title, f.district, f.description, f.price, f.need, f.pct, f.term, o.id]
     );
     notifyAdmins((lang) => lang === 'ro'
-      ? `✏️ Oferta modificată, verificați din nou: <b>${tg.escHtml(f.title)}</b>.`
-      : `✏️ Предложение изменено, нужна повторная проверка: <b>${tg.escHtml(f.title)}</b>.`);
+      ? `✏️ Anunțul modificat, verificați din nou: <b>${tg.escHtml(f.title)}</b>.`
+      : `✏️ Объявление изменено, нужна повторная проверка: <b>${tg.escHtml(f.title)}</b>.`);
     return { ok: true };
   });
 
@@ -316,7 +316,7 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
   route('GET', '/api/market/offers/:id', async ({ user, params }) => {
     const o = await loadOffer(params.id);
     const mine = Number(o.user_id) === Number(user.id);
-    if (o.status !== 'approved' && !mine && !user.is_admin) fail(404, 'Предложение не найдено');
+    if (o.status !== 'approved' && !mine && !user.is_admin) fail(404, 'Объявление не найдено');
     const closed = await dealsClosed([Number(o.user_id)]);
     const out = offerOut(o, closed);
     out.mine = mine;
@@ -358,8 +358,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
   // Инвестор откликается на предложение
   route('POST', '/api/market/offers/:id/respond', async ({ user, params, body }) => {
     const o = await loadOffer(params.id);
-    if (o.status !== 'approved') fail(400, 'Предложение сейчас не принимает отклики');
-    if (Number(o.user_id) === Number(user.id)) fail(400, 'Это ваше предложение');
+    if (o.status !== 'approved') fail(400, 'Объявление сейчас не принимает отклики');
+    if (Number(o.user_id) === Number(user.id)) fail(400, 'Это ваше объявление');
     const exists = await db.one('SELECT id, status FROM market_responses WHERE offer_id = $1 AND investor_id = $2', [o.id, user.id]);
     if (exists && exists.status !== 'declined') fail(409, 'Вы уже откликнулись');
     const message = str(body.message, 500) || null;
@@ -368,8 +368,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     const prof = await db.one(`SELECT amount_from, amount_to FROM investor_profiles WHERE user_id = $1 AND status = 'approved'`, [user.id]);
     const range = prof ? ` (${prof.amount_from ? fmtEur(prof.amount_from) + ' – ' : ''}${fmtEur(prof.amount_to)})` : '';
     notifyUser(o.user_id, (lang) => lang === 'ro'
-      ? `🤝 Investitorul <b>${tg.escHtml(user.name)}</b>${range} este interesat de oferta «${tg.escHtml(o.title)}». Acceptați — și veți primi contactele reciproc.`
-      : `🤝 Инвестор <b>${tg.escHtml(user.name)}</b>${range} заинтересовался предложением «${tg.escHtml(o.title)}». Примите отклик — и вы получите контакты друг друга.`,
+      ? `🤝 Investitorul <b>${tg.escHtml(user.name)}</b>${range} este interesat de anunțul «${tg.escHtml(o.title)}». Acceptați — și veți primi contactele reciproc.`
+      : `🤝 Инвестор <b>${tg.escHtml(user.name)}</b>${range} заинтересовался объявлением «${tg.escHtml(o.title)}». Примите отклик — и вы получите контакты друг друга.`,
     `/market/o/${o.id}`);
     return { ok: true };
   });
@@ -389,8 +389,8 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     if (exists) await db.query(`UPDATE market_responses SET initiator = 'owner', message = $1, status = 'pending', created_at = now(), answered_at = NULL WHERE id = $2`, [message, exists.id]);
     else await db.query(`INSERT INTO market_responses (offer_id, investor_id, initiator, message) VALUES ($1, $2, 'owner', $3)`, [o.id, investorId, message]);
     notifyUser(investorId, (lang) => lang === 'ro'
-      ? `💼 <b>${tg.escHtml(user.name)}</b> vă propune o tranzacție: «${tg.escHtml(o.title)}», necesar ${fmtEur(o.need_amount)}. Acceptați — și veți primi contactele reciproc.`
-      : `💼 <b>${tg.escHtml(user.name)}</b> предлагает вам сделку: «${tg.escHtml(o.title)}», нужно ${fmtEur(o.need_amount)}. Примите — и вы получите контакты друг друга.`,
+      ? `💼 <b>${tg.escHtml(user.name)}</b> vă propune un obiect: «${tg.escHtml(o.title)}», necesar ${fmtEur(o.need_amount)}. Acceptați — și veți primi contactele reciproc.`
+      : `💼 <b>${tg.escHtml(user.name)}</b> предлагает вам объект: «${tg.escHtml(o.title)}», нужно ${fmtEur(o.need_amount)}. Примите — и вы получите контакты друг друга.`,
     `/market/o/${o.id}`);
     return { ok: true };
   });
@@ -412,15 +412,15 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
     if (accept) {
       const [cOwner, cInv] = [await contacts(r.owner_id), await contacts(r.investor_id)];
       notifyUser(r.investor_id, (lang) => lang === 'ro'
-        ? `✅ Contact deschis pentru «${title}».\nAutorul ofertei: ${contactLine(cOwner, lang)}`
-        : `✅ Контакты открыты по сделке «${title}».\nАвтор предложения: ${contactLine(cOwner, lang)}`, `/market/o/${r.offer_id}`);
+        ? `✅ Contact deschis pentru «${title}».\nAutorul anunțului: ${contactLine(cOwner, lang)}`
+        : `✅ Контакты открыты по объявлению «${title}».\nАвтор объявления: ${contactLine(cOwner, lang)}`, `/market/o/${r.offer_id}`);
       notifyUser(r.owner_id, (lang) => lang === 'ro'
         ? `✅ Contact deschis pentru «${title}».\nInvestitor: ${contactLine(cInv, lang)}`
-        : `✅ Контакты открыты по сделке «${title}».\nИнвестор: ${contactLine(cInv, lang)}`, `/market/o/${r.offer_id}`);
+        : `✅ Контакты открыты по объявлению «${title}».\nИнвестор: ${contactLine(cInv, lang)}`, `/market/o/${r.offer_id}`);
     } else {
       notifyUser(other, (lang) => lang === 'ro'
         ? `Răspunsul pentru «${title}» a fost refuzat.`
-        : `По сделке «${title}» отклик отклонён.`, `/market`);
+        : `По объявлению «${title}» отклик отклонён.`, `/market`);
     }
     return { ok: true };
   });
@@ -474,15 +474,15 @@ module.exports = function registerMarket({ route, db, fail, str, num, tg, appUrl
       const o = await loadOffer(params.id);
       await db.query('UPDATE market_offers SET status = $1, reject_reason = $2, updated_at = now() WHERE id = $3', [status, reason, o.id]);
       notifyUser(o.user_id, (lang) => approve
-        ? (lang === 'ro' ? `✅ Oferta «${tg.escHtml(o.title)}» a fost publicată pe panou.` : `✅ Предложение «${tg.escHtml(o.title)}» опубликовано на доске.`)
-        : (lang === 'ro' ? `Oferta «${tg.escHtml(o.title)}» nu a fost publicată.${reason ? ' Motiv: ' + tg.escHtml(reason) : ''}` : `Предложение «${tg.escHtml(o.title)}» не опубликовано.${reason ? ' Причина: ' + tg.escHtml(reason) : ''}`),
+        ? (lang === 'ro' ? `✅ Anunțul «${tg.escHtml(o.title)}» a fost publicat pe panou.` : `✅ Объявление «${tg.escHtml(o.title)}» опубликовано на доске.`)
+        : (lang === 'ro' ? `Anunțul «${tg.escHtml(o.title)}» nu a fost publicat.${reason ? ' Motiv: ' + tg.escHtml(reason) : ''}` : `Объявление «${tg.escHtml(o.title)}» не опубликовано.${reason ? ' Причина: ' + tg.escHtml(reason) : ''}`),
       `/market/o/${o.id}`);
     } else if (params.kind === 'profile') {
       const p = await db.one('SELECT user_id FROM investor_profiles WHERE user_id = $1', [params.id]);
       if (!p) fail(404, 'Анкета не найдена');
       await db.query('UPDATE investor_profiles SET status = $1, reject_reason = $2, updated_at = now() WHERE user_id = $3', [status, reason, p.user_id]);
       notifyUser(p.user_id, (lang) => approve
-        ? (lang === 'ro' ? '✅ Profilul dvs. de investitor a fost publicat. Autorii ofertelor vă pot propune tranzacții.' : '✅ Ваша анкета инвестора опубликована. Авторы сделок смогут предлагать вам сделки.')
+        ? (lang === 'ro' ? '✅ Profilul dvs. de investitor a fost publicat. Autorii anunțurilor vă pot propune obiecte.' : '✅ Ваша анкета инвестора опубликована. Авторы объявлений смогут предлагать вам объекты.')
         : (lang === 'ro' ? `Profilul de investitor nu a fost publicat.${reason ? ' Motiv: ' + tg.escHtml(reason) : ''}` : `Анкета инвестора не опубликована.${reason ? ' Причина: ' + tg.escHtml(reason) : ''}`),
       '/market');
     } else fail(404, 'Не найдено');
