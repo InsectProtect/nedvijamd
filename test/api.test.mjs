@@ -30,7 +30,7 @@ await B('POST', '/api/register', { email: `buh${sfx}@t.md`, name: 'Бухгал�
 r = await A('POST', '/api/login', { email: `artem${sfx}@t.md`, password: 'wrong' });
 ok(r.status === 401, 'wrong password rejected');
 
-r = await A('POST', '/api/objects', { name: 'Ботаника, 2 комн.', area: 54, sale_price: 105000, status: 'ремонт' });
+r = await A('POST', '/api/objects', { name: 'Ботаника, 2 комн.', area: 54, purchase_price: 68000, sale_price: 105000, status: 'ремонт' });
 const oid = r.data.id;
 ok(oid, 'object created');
 
@@ -71,7 +71,7 @@ r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'in', amount: 100 });
 ok(r.status === 403, 'foreman cannot contribute');
 r = await B('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 100 });
 ok(r.status === 403, 'viewer cannot add');
-await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Покупка', amount: 68000 });
+
 await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Ремонт', amount: 14000 });
 await A('POST', `/api/objects/${oid}/entries`, { kind: 'plan', category: 'Нотариус и регистрация', amount: 1800 });
 r = await D('DELETE', `/api/entries/${fEntry}`);

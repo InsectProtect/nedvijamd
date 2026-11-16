@@ -152,3 +152,14 @@ select.field { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 .auth-logo { font-family: Manrope, sans-serif; font-weight: 700; font-size: 40px; letter-spacing: -0.03em; }
 .err { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 18px; }
 .loading { display: flex; align-items: center; justify-content: center; min-height: 60vh; color: var(--muted); }
+.tg .back-btn { visibility: hidden; }
+
+.obj-thumb { width: 56px; height: 56px; border-radius: 14px; background: var(--card2) center/cover no-repeat; flex: none; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.obj-thumb svg { width: 20px; height: 20px; }
+.hero-photo { margin-top: 16px; height: 200px; border-radius: 22px; background: var(--card) center/cover no-repeat; border: 1px solid var(--line); }
+.hero-photo.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--gold); font-size: 14px; height: 120px; border-style: dashed; border-color: #3A3A40; background: transparent; }
+.cover-pick { margin-top: 20px; height: 180px; border-radius: 22px; border: 1px dashed #3A3A40; background: var(--card) center/cover no-repeat; position: relative; display: flex; align-items: flex-end; justify-content: center; padding: 14px; overflow: hidden; }
+.cover-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 20px; background: rgba(13,13,14,0.75); border: 1px solid #3A3A40; color: var(--text); font-size: 14px; cursor: pointer; }
+.cover-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.cover-rm { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 18px; background: rgba(13,13,14,0.75); border: 1px solid #3A3A40; color: var(--text); padding: 0; display: flex; align-items: center; justify-content: center; }
+.cover-rm svg { width: 16px; height: 16px; }

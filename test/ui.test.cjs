@@ -39,6 +39,10 @@ require('fs').mkdirSync(OUT, { recursive: true });
   await a.fill('#area', '54');
   await a.selectOption('#status', 'ремонт');
   await a.fill('#sale', '105000');
+  await a.fill('#buy', '68000');
+  await a.setInputFiles('#coverIn', receipt);
+  await a.waitForTimeout(500);
+  await shot(a, '01b-object-form');
   await a.click('button.btn');
   await a.waitForSelector('h1.h');
   const oid = a.url().match(/#\/o\/(\d+)/)[1];
@@ -150,6 +154,9 @@ require('fs').mkdirSync(OUT, { recursive: true });
   await a.goto(`${BASE}/#/`);
   await a.waitForSelector('.obj');
   await shot(a, '13-home');
+  await a.goto(`${BASE}/#/o/${oid}`);
+  await a.waitForSelector('.hero-photo');
+  await shot(a, '15-object-photo');
 
   // удаление
   await a.goto(`${BASE}/#/o/${oid}/delete`);

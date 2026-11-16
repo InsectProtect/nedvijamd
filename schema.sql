@@ -82,3 +82,11 @@ CREATE TABLE IF NOT EXISTS tg_links (
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Стоимость покупки объекта
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS purchase_price NUMERIC;
+
+-- Фото объекта для карточки
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS photo BYTEA;
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS photo_mime TEXT;
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS photo_v INT NOT NULL DEFAULT 0;

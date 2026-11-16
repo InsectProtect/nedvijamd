@@ -47,6 +47,16 @@ function computeObject(object, members, entries) {
     }
   }
 
+  // Стоимость покупки из карточки объекта — это план по статье «Покупка»
+  const purchase = n(object.purchase_price);
+  if (purchase > 0) {
+    const c = catOf('Покупка');
+    if (purchase > c.plan) {
+      planTotal += purchase - c.plan;
+      c.plan = purchase;
+    }
+  }
+
   const categories = Object.values(cats).sort(
     (a, b) => idx(a.category) - idx(b.category)
   );

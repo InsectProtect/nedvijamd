@@ -91,7 +91,7 @@ function go(hash) {
   else location.hash = hash;
 }
 
-const backBtn = (href, label = 'Назад') => `<a class="icon-btn" href="${href}" aria-label="${label}">${I.back}</a>`;
+const backBtn = (href, label = 'Назад') => `<a class="icon-btn back-btn" href="${href}" aria-label="${label}">${I.back}</a>`;
 const tabbar = (active, plusHref) => `
   <nav class="tabbar" aria-label="Навигация">
     <a href="#/" class="${active === 'home' ? 'on' : ''}" aria-label="Объекты">${I.grid}</a>
@@ -250,6 +250,7 @@ async function viewHome() {
   };
   const list = d.objects.map((o) => `
     <a class="obj" href="#/o/${o.id}">
+      ${o.photo ? `<span class="obj-thumb" style="background-image:url('${o.photo}')"></span>` : `<span class="obj-thumb empty">${I.grid}</span>`}
       <div style="flex:1 1 auto;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="name">${esc(o.name)}</span><span class="badge ${esc(o.status)}">${esc(o.status)}</span>${o.delete_requested ? '<span class="badge red">удаление</span>' : ''}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
@@ -257,7 +258,7 @@ async function viewHome() {
           <span class="muted" style="font-size:12px">${roleLine(o)}</span>
         </div>
       </div>
-      <div style="text-align:right">
+      <div style="text-align:right;white-space:nowrap;flex:none">
         <div class="display num" style="font-weight:600;font-size:15px">${money(o.my_invested)}</div>
         ${o.my_profit !== null ? `<div class="gold num" style="font-size:12px;margin-top:4px">≈ ${signed(o.my_profit)} €</div>` : '<div class="muted" style="font-size:12px;margin-top:4px">нет прогноза</div>'}
       </div>
@@ -318,7 +319,8 @@ function viewProfile() {
 }
 
 async function viewObjectForm(id) {
-  let o = { name: '', area: '', status: 'покупка', sale_price: '' };
+  let o = { name: '', area: '', status: 'покупка', purchase_price: '', sale_price: '', photo: null };
+  const ph = { data: null, preview: null, remove: false };
   if (id) {
     const d = await api('GET', `/api/objects/${id}`);
     if (!d.me.isCreator) { toast('Редактировать может только создатель'); return go(`#/o/${id}`); }
@@ -328,10 +330,17 @@ async function viewObjectForm(id) {
     <div class="screen no-tab">
       <div class="topbar">${backBtn(id ? `#/o/${id}` : '#/')}<div class="title"><b>${id ? 'Объект' : 'Новый объект'}</b></div><div class="spacer44"></div></div>
       <form id="f">
+        <div class="cover-pick" id="cover" style="${o.photo ? `background-image:url('${o.photo}')` : ''}">
+          <label class="cover-btn">${I.camera}<span id="coverTxt">${o.photo ? 'Заменить фото' : 'Добавить фото объекта'}</span>
+            <input type="file" accept="image/*" id="coverIn" aria-label="Фото объекта"></label>
+          <button type="button" class="cover-rm" id="coverRm" aria-label="Убрать фото" style="${o.photo ? '' : 'display:none'}">${I.close}</button>
+        </div>
         <label class="label" for="name">Название</label>
         <input class="field" id="name" placeholder="Например: Ботаника, 2 комн." value="${esc(o.name)}" required>
         <label class="label" for="area">Площадь, м²</label>
         <input class="field" id="area" inputmode="decimal" value="${esc(o.area ?? '')}">
+        <label class="label" for="buy">Стоимость покупки, €</label>
+        <input class="field" id="buy" inputmode="decimal" value="${esc(o.purchase_price ?? '')}" placeholder="Цена квартиры по договору">
         <label class="label" for="status">Статус</label>
         <select class="field" id="status">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
         <label class="label" for="sale">Ориентировочная цена продажи, €</label>
@@ -340,18 +349,41 @@ async function viewObjectForm(id) {
         <button class="btn" style="margin-top:24px">${id ? 'Сохранить' : 'Создать объект'}</button>
       </form>
     </div>`;
+  const cover = app.querySelector('#cover');
+  app.querySelector('#coverIn').onchange = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      const p = await compressImage(f, 1400, 0.8);
+      ph.data = p; ph.remove = false;
+      cover.style.backgroundImage = `url('${p.preview}')`;
+      app.querySelector('#coverRm').style.display = '';
+      app.querySelector('#coverTxt').textContent = 'Заменить фото';
+    } catch (ex) { toast(ex.message); }
+  };
+  app.querySelector('#coverRm').onclick = () => {
+    ph.data = null; ph.remove = true;
+    cover.style.backgroundImage = '';
+    app.querySelector('#coverRm').style.display = 'none';
+    app.querySelector('#coverTxt').textContent = 'Добавить фото объекта';
+  };
   app.querySelector('#f').onsubmit = async (e) => {
     e.preventDefault();
+    const btn = app.querySelector('#f .btn');
+    btn.disabled = true;
     const body = {
+      photo: ph.data ? { mime: ph.data.mime, data: ph.data.data } : undefined,
+      remove_photo: ph.remove || undefined,
       name: app.querySelector('#name').value,
       area: app.querySelector('#area').value.replace(',', '.'),
       status: app.querySelector('#status').value,
+      purchase_price: app.querySelector('#buy').value.replace(/\s/g, '').replace(',', '.'),
       sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.')
     };
     try {
       if (id) { await api('PATCH', `/api/objects/${id}`, body); go(`#/o/${id}`); }
       else { const r = await api('POST', '/api/objects', body); go(`#/o/${r.id}`); }
-    } catch (ex) { toast(ex.message); }
+    } catch (ex) { toast(ex.message); btn.disabled = false; }
   };
 }
 
@@ -388,7 +420,8 @@ async function viewObject(id, filter = 'all') {
           <a class="icon-btn" href="#/o/${id}/delete" aria-label="Удаление и выгрузка">${I.more}</a>
         </div>
       </div>
-      <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}</div>
+      ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
+      <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? ` · куплена за ${money(o.purchase_price)}` : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
       <div class="stats">
@@ -606,7 +639,7 @@ async function viewForecast(id) {
   const save = app.querySelector('#saveSale');
   if (save) save.onclick = async () => {
     try {
-      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
+      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, purchase_price: o.purchase_price, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
       delete state.cache[id];
       toast('Цена сохранена', true);
       viewForecast(id);
@@ -828,6 +861,7 @@ async function render() {
 }
 
 function setupTelegram() {
+  document.body.classList.add('tg');
   TG.ready();
   TG.expand();
   try { TG.setHeaderColor('#0D0D0E'); TG.setBackgroundColor('#0D0D0E'); } catch { /* старый клиент */ }

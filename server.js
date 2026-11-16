@@ -161,7 +161,8 @@ async function membership(objectId, userId) {
 
 async function loadObject(objectId) {
   const object = await db.one(
-    `SELECT id, name, area, status, sale_price, creator_id, delete_requested_at, created_at FROM objects WHERE id = $1`,
+    `SELECT id, name, area, status, purchase_price, sale_price, creator_id, delete_requested_at, created_at,
+            (photo IS NOT NULL) AS has_photo, photo_v FROM objects WHERE id = $1`,
     [objectId]
   );
   if (!object) fail(404, 'Объект не найден');
@@ -222,6 +223,22 @@ async function maybeFinishDelete(objectId) {
     return true;
   }
   return false;
+}
+
+async function saveObjectPhoto(objectId, body) {
+  if (body.remove_photo === true) {
+    await db.query('UPDATE objects SET photo = NULL, photo_mime = NULL, photo_v = photo_v + 1 WHERE id = $1', [objectId]);
+    return;
+  }
+  const p = body.photo;
+  if (!p) return;
+  if (!/^image\/(jpeg|png|webp)$/.test(p.mime || '') || typeof p.data !== 'string') fail(400, 'Неподдерживаемый формат фото');
+  const buf = Buffer.from(p.data, 'base64');
+  if (!buf.length || buf.length > MAX_PHOTO) fail(400, 'Фото слишком большое');
+  await db.query(
+    `UPDATE objects SET photo = decode($1, 'base64'), photo_mime = $2, photo_v = photo_v + 1 WHERE id = $3`,
+    [buf.toString('base64'), p.mime, objectId]
+  );
 }
 
 async function savePhotos(entryId, userId, photos) {
@@ -336,6 +353,7 @@ route('GET', '/api/objects', async ({ user }) => {
       name: object.name,
       status: object.status,
       area: num(object.area),
+      photo: object.has_photo === true || object.has_photo === 't' ? `/api/objects/${object.id}/photo?v=${object.photo_v}` : null,
       role: me.role,
       share_pct: Number(me.share_pct),
       foreman_mode: me.foreman_mode,
@@ -355,10 +373,12 @@ route('POST', '/api/objects', async ({ user, body }) => {
   if (!name) fail(400, 'Введите название объекта');
   const area = num(body.area);
   const sale = num(body.sale_price);
+  const buy = num(body.purchase_price);
   const obj = await db.one(
-    `INSERT INTO objects (name, area, status, sale_price, creator_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, user.id]
+    `INSERT INTO objects (name, area, status, purchase_price, sale_price, creator_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(buy) ? buy : null, Number.isFinite(sale) ? sale : null, user.id]
   );
+  await saveObjectPhoto(obj.id, body);
   await db.query(
     `INSERT INTO members (object_id, user_id, role, share_pct) VALUES ($1, $2, 'investor', 100)`,
     [obj.id, user.id]
@@ -377,7 +397,9 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       name: object.name,
       area: num(object.area),
       status: object.status,
+      purchase_price: num(object.purchase_price),
       sale_price: num(object.sale_price),
+      photo: object.has_photo === true || object.has_photo === 't' ? `/api/objects/${object.id}/photo?v=${object.photo_v}` : null,
       creator_id: Number(object.creator_id),
       delete_requested: !!object.delete_requested_at
     },
@@ -415,10 +437,12 @@ route('PATCH', '/api/objects/:id', async ({ user, params, body }) => {
   if (!name) fail(400, 'Введите название объекта');
   const area = num(body.area);
   const sale = num(body.sale_price);
+  const buy = num(body.purchase_price);
   await db.query(
-    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4 WHERE id = $5`,
-    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, params.id]
+    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4, purchase_price = $5 WHERE id = $6`,
+    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, Number.isFinite(buy) ? buy : null, params.id]
   );
+  await saveObjectPhoto(params.id, body);
   return { ok: true };
 });
 
@@ -680,6 +704,17 @@ async function serveReceipt(req, res, id) {
   res.end(buf);
 }
 
+async function serveObjectPhoto(req, res, id) {
+  const user = await currentUser(req);
+  if (!user) fail(401, 'Нужно войти');
+  await membership(id, user.id);
+  const r = await db.one(`SELECT photo_mime, encode(photo, 'base64') AS b64 FROM objects WHERE id = $1 AND photo IS NOT NULL`, [id]);
+  if (!r) fail(404, 'Фото нет');
+  const buf = Buffer.from(r.b64, 'base64');
+  res.writeHead(200, { 'Content-Type': r.photo_mime, 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=604800' });
+  res.end(buf);
+}
+
 async function serveExport(req, res, id) {
   const user = await currentUser(req);
   if (!user) fail(401, 'Нужно войти');
@@ -794,6 +829,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/tg/webhook') return await handleWebhook(req, res);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/receipts\/(\d+)\/image$/))) return await serveReceipt(req, res, m[1]);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/objects\/(\d+)\/export\.csv$/))) return await serveExport(req, res, m[1]);
+    if (req.method === 'GET' && (m = pathname.match(/^\/api\/objects\/(\d+)\/photo$/))) return await serveObjectPhoto(req, res, m[1]);
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 
     for (const r of routes) {
