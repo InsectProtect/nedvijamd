@@ -369,7 +369,7 @@ async function viewHome() {
       </div>
       ${active.length ? `<a class="card" href="#/market" style="display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:14px;padding-bottom:14px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
         <span class="gold" style="display:inline-flex;width:24px;height:24px">${I.deals}</span>
-        <div style="flex:1;font-size:14px"><b style="font-weight:600">Доска сделок</b> <span class="muted">· найти инвестора или сделку</span></div>${I.chev}</a>` : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+        <div style="flex:1;font-size:14px"><b style="font-weight:600">Доска объявлений</b> <span class="muted">· сделки и инвесторы</span></div>${I.chev}</a>` : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
         <span class="gold" style="display:inline-flex;width:28px;height:28px">${I.deals}</span>
         <div style="flex:1"><div style="font-size:15px;font-weight:600">Хочу стать инвестором</div><div class="muted" style="font-size:12px;line-height:1.4;margin-top:2px">Есть деньги — найдите сделку. Есть объект — найдите инвестора.</div></div>${I.chev}</a>`}
       <div class="section-h"><h2>Объекты</h2><a class="pill" href="#/new">${I.plusSm}Объект</a></div>
@@ -1794,8 +1794,8 @@ async function viewMarket(tab) {
   const mine = d.offers.filter((o) => o.mine && o.status !== 'closed');
   app.innerHTML = `
     <div class="screen">
-      <div class="topbar"><div class="logo">Доска</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
-      <div class="lead" style="margin-top:6px">Доска совместных инвестиций: авторы предлагают объекты, инвесторы вкладывают деньги. Всё публикуется после проверки, контакты открываются, когда обе стороны согласны.</div>
+      <div class="topbar"><div class="logo">Доска объявлений</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
+      <div class="lead" style="margin-top:6px">Объявления о сделках и анкеты инвесторов. Всё публикуется после проверки, контакты открываются, когда обе стороны согласны.</div>
       ${d.inbox ? `<a class="card gold-b" href="#/market/inbox" style="display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--text);border-color:#5A4E33"><span style="flex:1;font-size:14px">Ждут вашего ответа: <b class="gold">${d.inbox}</b></span>${I.chev}</a>` : `<a href="#/market/inbox" class="muted" style="display:block;font-size:13px;margin-top:12px">Мои отклики и предложения →</a>`}
       <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:16px"><button data-mt="deals" class="${tab === 'deals' ? 'on' : ''}">Сделки · ${deals.length}</button><button data-mt="investors" class="${tab === 'investors' ? 'on' : ''}">Инвесторы · ${d.investors.length}</button></div>
       ${tab === 'deals' ? `
