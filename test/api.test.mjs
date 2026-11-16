@@ -119,5 +119,19 @@ ok(r.data.deleted === true, 'all agreed → deleted');
 r = await A('GET', `/api/objects/${oid}`);
 ok(r.status === 404, 'object gone');
 
+// рассрочка
+r = await A('POST', '/api/objects', { name: 'Рассрочка', purchase_price: 60000, installment: true, installment_monthly: 1500 });
+const inst = r.data.id;
+await A('POST', `/api/objects/${inst}/entries`, { kind: 'out', category: 'Покупка', amount: 20000, note: 'Первый взнос' });
+await A('POST', `/api/objects/${inst}/entries`, { kind: 'out', category: 'Покупка', amount: 1500, note: 'Платёж' });
+r = await A('GET', `/api/objects/${inst}`);
+const ins = r.data.object.installment;
+ok(ins && ins.paid === 21500 && ins.left === 38500 && ins.payments_left === 26, 'installment progress: ' + JSON.stringify(ins));
+r = await A('GET', '/api/objects');
+ok(r.data.objects.find((o) => o.id === inst).installment.left === 38500, 'installment in list');
+r = await A('PATCH', `/api/objects/${inst}`, { name: 'Рассрочка', purchase_price: 60000, installment: false });
+r = await A('GET', `/api/objects/${inst}`);
+ok(r.data.object.installment === null, 'installment can be turned off');
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

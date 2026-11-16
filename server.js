@@ -161,7 +161,7 @@ async function membership(objectId, userId) {
 
 async function loadObject(objectId) {
   const object = await db.one(
-    `SELECT id, name, area, status, purchase_price, sale_price, creator_id, delete_requested_at, created_at,
+    `SELECT id, name, area, status, purchase_price, sale_price, installment, installment_monthly, creator_id, delete_requested_at, created_at,
             (photo IS NOT NULL) AS has_photo, photo_v FROM objects WHERE id = $1`,
     [objectId]
   );
@@ -223,6 +223,24 @@ async function maybeFinishDelete(objectId) {
     return true;
   }
   return false;
+}
+
+// Рассрочка: выплачено = фактические расходы по статье «Покупка», всего = стоимость покупки
+function installmentInfo(object, calc) {
+  if (!(object.installment === true || object.installment === 't')) return null;
+  const total = Number(object.purchase_price) || 0;
+  const cat = calc.categories.find((c) => c.category === 'Покупка');
+  const paid = cat ? cat.fact : 0;
+  const left = Math.max(0, Math.round((total - paid) * 100) / 100);
+  const monthly = Number(object.installment_monthly) || 0;
+  return {
+    total,
+    paid,
+    left,
+    monthly: monthly || null,
+    payments_left: monthly > 0 ? Math.ceil(left / monthly) : null,
+    pct: total > 0 ? Math.min(100, Math.round((paid / total) * 1000) / 10) : 0
+  };
 }
 
 async function saveObjectPhoto(objectId, body) {
@@ -354,6 +372,7 @@ route('GET', '/api/objects', async ({ user }) => {
       status: object.status,
       area: num(object.area),
       photo: object.has_photo === true || object.has_photo === 't' ? `/api/objects/${object.id}/photo?v=${object.photo_v}` : null,
+      installment: installmentInfo(object, calc),
       role: me.role,
       share_pct: Number(me.share_pct),
       foreman_mode: me.foreman_mode,
@@ -374,9 +393,12 @@ route('POST', '/api/objects', async ({ user, body }) => {
   const area = num(body.area);
   const sale = num(body.sale_price);
   const buy = num(body.purchase_price);
+  const monthly = num(body.installment_monthly);
   const obj = await db.one(
-    `INSERT INTO objects (name, area, status, purchase_price, sale_price, creator_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(buy) ? buy : null, Number.isFinite(sale) ? sale : null, user.id]
+    `INSERT INTO objects (name, area, status, purchase_price, sale_price, installment, installment_monthly, creator_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(buy) ? buy : null, Number.isFinite(sale) ? sale : null,
+      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, user.id]
   );
   await saveObjectPhoto(obj.id, body);
   await db.query(
@@ -400,6 +422,8 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       purchase_price: num(object.purchase_price),
       sale_price: num(object.sale_price),
       photo: object.has_photo === true || object.has_photo === 't' ? `/api/objects/${object.id}/photo?v=${object.photo_v}` : null,
+      installment: installmentInfo(object, calc),
+      installment_monthly: num(object.installment_monthly),
       creator_id: Number(object.creator_id),
       delete_requested: !!object.delete_requested_at
     },
@@ -438,9 +462,11 @@ route('PATCH', '/api/objects/:id', async ({ user, params, body }) => {
   const area = num(body.area);
   const sale = num(body.sale_price);
   const buy = num(body.purchase_price);
+  const monthly = num(body.installment_monthly);
   await db.query(
-    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4, purchase_price = $5 WHERE id = $6`,
-    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, Number.isFinite(buy) ? buy : null, params.id]
+    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4, purchase_price = $5, installment = $6, installment_monthly = $7 WHERE id = $8`,
+    [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, Number.isFinite(buy) ? buy : null,
+      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, params.id]
   );
   await saveObjectPhoto(params.id, body);
   return { ok: true };

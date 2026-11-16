@@ -257,6 +257,7 @@ async function viewHome() {
           <span style="display:flex">${o.people.slice(0, 5).map((p) => avatar(p.user_id, p.name, 'sm')).join('')}</span>
           <span class="muted" style="font-size:12px">${roleLine(o)}</span>
         </div>
+        ${o.installment ? `<div class="muted" style="font-size:12px;margin-top:6px">Рассрочка: осталось <span class="num" style="color:var(--text)">${money(o.installment.left)}</span></div>` : ''}
       </div>
       <div style="text-align:right;white-space:nowrap;flex:none">
         <div class="display num" style="font-weight:600;font-size:15px">${money(o.my_invested)}</div>
@@ -319,7 +320,7 @@ function viewProfile() {
 }
 
 async function viewObjectForm(id) {
-  let o = { name: '', area: '', status: 'покупка', purchase_price: '', sale_price: '', photo: null };
+  let o = { name: '', area: '', status: 'покупка', purchase_price: '', sale_price: '', photo: null, installment: null, installment_monthly: '' };
   const ph = { data: null, preview: null, remove: false };
   if (id) {
     const d = await api('GET', `/api/objects/${id}`);
@@ -341,6 +342,13 @@ async function viewObjectForm(id) {
         <input class="field" id="area" inputmode="decimal" value="${esc(o.area ?? '')}">
         <label class="label" for="buy">Стоимость покупки, €</label>
         <input class="field" id="buy" inputmode="decimal" value="${esc(o.purchase_price ?? '')}" placeholder="Цена квартиры по договору">
+        <span class="label">Как покупаем</span>
+        <div class="seg" style="grid-template-columns:1fr 1fr"><button type="button" data-inst="0" class="${o.installment ? '' : 'on'}">Сразу</button><button type="button" data-inst="1" class="${o.installment ? 'on' : ''}">В рассрочку</button></div>
+        <div id="instBox" style="${o.installment ? '' : 'display:none'}">
+          <label class="label" for="monthly">Ежемесячный платёж, €</label>
+          <input class="field" id="monthly" inputmode="decimal" value="${esc(o.installment_monthly ?? '')}" placeholder="Необязательно — для расчёта, сколько платежей осталось">
+          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.45">«Стоимость покупки» — полная сумма по договору рассрочки. Каждый платёж вносите как расход в категории «Покупка» — приложение покажет, сколько выплачено и сколько осталось.</div>
+        </div>
         <label class="label" for="status">Статус</label>
         <select class="field" id="status">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
         <label class="label" for="sale">Ориентировочная цена продажи, €</label>
@@ -349,6 +357,12 @@ async function viewObjectForm(id) {
         <button class="btn" style="margin-top:24px">${id ? 'Сохранить' : 'Создать объект'}</button>
       </form>
     </div>`;
+  let inst = !!o.installment;
+  on('[data-inst]', 'click', (e) => {
+    inst = e.currentTarget.dataset.inst === '1';
+    app.querySelectorAll('[data-inst]').forEach((b) => b.classList.toggle('on', (b.dataset.inst === '1') === inst));
+    app.querySelector('#instBox').style.display = inst ? '' : 'none';
+  });
   const cover = app.querySelector('#cover');
   app.querySelector('#coverIn').onchange = async (e) => {
     const f = e.target.files && e.target.files[0];
@@ -378,7 +392,9 @@ async function viewObjectForm(id) {
       area: app.querySelector('#area').value.replace(',', '.'),
       status: app.querySelector('#status').value,
       purchase_price: app.querySelector('#buy').value.replace(/\s/g, '').replace(',', '.'),
-      sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.')
+      sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.'),
+      installment: inst,
+      installment_monthly: app.querySelector('#monthly').value.replace(/\s/g, '').replace(',', '.')
     };
     try {
       if (id) { await api('PATCH', `/api/objects/${id}`, body); go(`#/o/${id}`); }
@@ -421,9 +437,25 @@ async function viewObject(id, filter = 'all') {
         </div>
       </div>
       ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
-      <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? ` · куплена за ${money(o.purchase_price)}` : ''}</div>
+      <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? (o.installment ? ` · в рассрочку за ${money(o.purchase_price)}` : ` · куплена за ${money(o.purchase_price)}`) : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
+      ${o.installment ? (() => {
+        const ins = o.installment;
+        return `<div class="card" style="margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Рассрочка</span><span class="muted" style="font-size:12px">${pct(ins.pct)}</span></div>
+          <div class="bar" style="height:6px;margin-top:10px"><i style="width:${ins.pct}%"></i></div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
+            <div><div class="muted" style="font-size:11px">Выплачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.paid)}</div></div>
+            <div><div class="muted" style="font-size:11px">Осталось</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.left)}</div></div>
+            <div><div class="muted" style="font-size:11px">Всего</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.total)}</div></div>
+          </div>
+          ${ins.total ? '' : '<div class="red" style="font-size:12px;margin-top:8px">Укажите стоимость покупки в настройках объекта</div>'}
+          ${ins.payments_left !== null && ins.left > 0 ? `<div class="muted" style="font-size:12px;margin-top:8px">≈ ${ins.payments_left} ${plural(ins.payments_left, 'платёж', 'платежа', 'платежей')} по ${money(ins.monthly)}</div>` : ''}
+          ${ins.left <= 0 && ins.total ? '<div class="gold" style="font-size:13px;margin-top:8px">Рассрочка полностью выплачена</div>' : ''}
+          ${me.canAdd && me.role !== 'foreman' && ins.left > 0 ? `<a class="btn sm" href="#/o/${id}/add/pay" style="margin-top:12px;width:100%">Внести платёж</a>` : ''}
+        </div>`;
+      })() : ''}
       <div class="stats">
         <div class="stat"><div class="k">Вложено</div><div class="v">${fmt(c.totalInvested)}</div></div>
         <div class="stat"><div class="k">Затраты · факт</div><div class="v gold">${fmt(c.factTotal)}</div></div>
@@ -467,15 +499,18 @@ async function viewAdd(id, presetKind) {
   if (!d.me.canAdd) { toast('Ваша роль не позволяет добавлять операции'); return go(`#/o/${id}`); }
   const foreman = d.me.role === 'foreman';
   const kinds = foreman ? [['out', 'Расход · факт'], ['plan', 'План']] : [['in', 'Взнос'], ['out', 'Расход · факт'], ['plan', 'План']];
+  const isPay = presetKind === 'pay' && !foreman;
   const s = {
-    kind: presetKind && kinds.some((k) => k[0] === presetKind) ? presetKind : foreman ? 'out' : 'out',
+    kind: isPay ? 'out' : presetKind && kinds.some((k) => k[0] === presetKind) ? presetKind : 'out',
     source: 'own',
-    category: foreman ? 'Ремонт' : 'Ремонт',
+    category: isPay ? 'Покупка' : 'Ремонт',
     photos: []
   };
+  const presetNote = isPay ? 'Платёж по рассрочке' : '';
+  const presetAmount = isPay && d.object.installment && d.object.installment.monthly ? String(Math.min(d.object.installment.monthly, d.object.installment.left)) : '';
   const draw = () => {
-    const amountVal = app.querySelector('#amt') ? app.querySelector('#amt').value : '';
-    const noteVal = app.querySelector('#note') ? app.querySelector('#note').value : '';
+    const amountVal = app.querySelector('#amt') ? app.querySelector('#amt').value : presetAmount;
+    const noteVal = app.querySelector('#note') ? app.querySelector('#note').value : presetNote;
     const dateVal = app.querySelector('#date') ? app.querySelector('#date').value : today();
     const isIn = s.kind === 'in', isPlan = s.kind === 'plan', isOut = s.kind === 'out';
     app.innerHTML = `
@@ -639,7 +674,7 @@ async function viewForecast(id) {
   const save = app.querySelector('#saveSale');
   if (save) save.onclick = async () => {
     try {
-      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, purchase_price: o.purchase_price, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
+      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, purchase_price: o.purchase_price, installment: !!o.installment, installment_monthly: o.installment_monthly, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
       delete state.cache[id];
       toast('Цена сохранена', true);
       viewForecast(id);
