@@ -58,6 +58,18 @@ const I = {
 };
 
 const ask = (m) => confirm(I18N.tr(m));
+// Сворачиваемые блоки: состояние запоминается на устройстве
+const foldOpen = (key, def) => { try { const v = localStorage.getItem('fold:' + key); return v === null ? def : v === '1'; } catch { return def; } };
+function bindFolds() {
+  app.querySelectorAll('details[data-fold]').forEach((el) => el.addEventListener('toggle', () => {
+    try { localStorage.setItem('fold:' + el.dataset.fold, el.open ? '1' : '0'); } catch { /* нет доступа */ }
+  }));
+}
+const monthTitle = (ym) => {
+  const [y, m] = ym.split('-').map(Number);
+  const t = new Intl.DateTimeFormat(I18N.lang === 'ro' ? 'ro-RO' : 'ru-RU', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1)).replace(/\s*г\.?$/, '');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 const langSwitch = () => `<div class="seg lang-seg" style="grid-template-columns:1fr 1fr" role="group" aria-label="Язык">
   <button type="button" data-lang="ru" class="${I18N.lang === 'ru' ? 'on' : ''}" data-nt>Русский</button>
   <button type="button" data-lang="ro" class="${I18N.lang === 'ro' ? 'on' : ''}" data-nt>Limba de stat</button></div>`;
@@ -366,18 +378,20 @@ async function viewContract(id) {
 
       ${!d.personal_data ? '<div class="card dashed" style="margin-top:12px;font-size:13px;line-height:1.5;color:#B5B5BA">IDNP и адреса сторон в приложении сейчас не собираются — в договоре для них оставлены пустые строки, их можно вписать от руки после печати.</div>' : ''}
       ${d.personal_data && (d.me.is_party || d.live_parties.some((p) => p.user_id === state.me.id)) ? `
-      <div class="label">Мои данные для договора</div>
-      <form class="card" id="mine" novalidate>
+      <details class="card fold" data-fold="c-mine" style="margin-top:12px" ${d.me.idnp && d.me.address ? (foldOpen('c-mine', false) ? 'open' : '') : 'open'}>
+      <summary><div style="flex:1"><div style="font-weight:500">Мои данные для договора</div><div class="muted" style="font-size:12px;margin-top:2px">${d.me.idnp && d.me.address ? 'заполнено' : '<span class="red">нужно заполнить</span>'}</div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+      <form id="mine" novalidate>
         <label class="label" for="idnp" style="margin-top:0">IDNP</label>
         <input class="field" id="idnp" inputmode="numeric" maxlength="13" value="${esc(d.me.idnp)}" placeholder="13 цифр">
         <label class="label" for="addr">Адрес проживания (domiciliu)</label>
         <input class="field" id="addr" value="${esc(d.me.address)}" placeholder="Город, улица, дом, квартира">
         <button class="btn ghost sm" style="margin-top:12px;width:100%">Сохранить мои данные</button>
-      </form>` : ''}
+      </form></details>` : ''}
 
       ${d.me.isCreator ? `
-      <div class="label">Данные договора · заполняет создатель</div>
-      <form class="card" id="cf" novalidate>
+      <details class="card fold" data-fold="c-fields-${id}" style="margin-top:10px" ${foldOpen('c-fields-' + id, !f.property_address) ? 'open' : ''}>
+      <summary><div style="flex:1"><div style="font-weight:500">Данные договора</div><div class="muted" style="font-size:12px;margin-top:2px">${f.property_address && f.cadastral ? 'заполняет создатель · заполнено' : 'заполняет создатель · <span class="red">не всё заполнено</span>'}</div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+      <form id="cf" novalidate>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
           <div>${fieldInput('number', 'Номер договора', 'Напр. 1')}</div>
           <div>${fieldInput('city', 'Город', 'mun. Chișinău')}</div>
@@ -397,12 +411,16 @@ async function viewContract(id) {
           <div>${fieldInput('payout_days', 'Выплата после продажи, дней', '10', 'text', 'numeric')}</div>
         </div>
         <button class="btn ghost sm" style="margin-top:14px;width:100%">Сохранить данные договора</button>
-      </form>` : ''}
+      </form></details>` : ''}
 
-      <div class="label" style="display:flex;justify-content:space-between;align-items:center"><span>Текст договора · Limba de stat</span><button class="link-btn" id="print">Распечатать / PDF</button></div>
-      <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:70vh;border:0;border-radius:16px;background:#E9E7E1"></iframe>
+      <details class="fold" data-fold="c-text" style="margin-top:18px" ${foldOpen('c-text', !iSigned) ? 'open' : ''}>
+        <summary><span class="muted" style="font-size:13px;flex:1">Текст договора · Limba de stat</span><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+        <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:70vh;border:0;border-radius:16px;background:#E9E7E1"></iframe>
+      </details>
+      <button class="btn ghost" id="print" style="margin-top:12px">Распечатать / PDF</button>
       <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Договор заполняется автоматически по данным объекта и участников. Это шаблон: перед подписанием покажите его юристу или нотариусу.</div>
     </div>`;
+  bindFolds();
   const frame = app.querySelector('#doc');
   frame.srcdoc = d.html;
   app.querySelector('#print').onclick = async () => {
@@ -508,8 +526,9 @@ function viewProfile() {
       <div class="label">Язык</div>
       ${langSwitch()}
       ${state.settings.personal_data ? `
-      <div class="label">Мои данные</div>
-      <form class="card" id="pd" novalidate>
+      <details class="card fold" data-fold="p-data" style="margin-top:20px" ${foldOpen('p-data', !(state.me.idnp || state.me.phone)) ? 'open' : ''}>
+      <summary><div style="flex:1"><div style="font-weight:500">Мои данные</div><div class="muted" style="font-size:12px;margin-top:2px">Телефон, дата рождения, IDNP, адрес</div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+      <form id="pd" novalidate>
         <label class="label" for="pd_phone" style="margin-top:0">Телефон</label>
         <input class="field" id="pd_phone" type="tel" inputmode="tel" autocomplete="tel" value="${esc(state.me.phone)}" placeholder="+373 …">
         <label class="label" for="pd_birth">Дата рождения</label>
@@ -518,9 +537,9 @@ function viewProfile() {
         <input class="field" id="pd_idnp" inputmode="numeric" maxlength="13" value="${esc(state.me.idnp)}" placeholder="13 цифр">
         <label class="label" for="pd_addr">Адрес проживания (domiciliu)</label>
         <input class="field" id="pd_addr" autocomplete="street-address" value="${esc(state.me.address)}" placeholder="Город, улица, дом, квартира">
-        <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Данные подставляются в договор и видны только участникам ваших объектов. Заполнять необязательно.</div>
+        <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Заполните один раз — данные автоматически подставятся во все ваши договоры, в том числе по будущим объектам. Видны только участникам ваших объектов.</div>
         <button class="btn ghost sm" style="margin-top:12px;width:100%">Сохранить мои данные</button>
-      </form>` : ''}
+      </form></details>` : ''}
       ${state.me.is_admin ? `
       <div class="label">Администрирование</div>
       <div class="card">
@@ -528,12 +547,11 @@ function viewProfile() {
         <div class="muted" style="font-size:12px;line-height:1.45;margin-top:4px">Телефон, дата рождения, IDNP и адрес. Когда выключено, поля скрыты у всех, договор подписывается без них, а в тексте остаются пустые строки, чтобы вписать от руки.</div>
         <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:12px"><button type="button" data-pd="0" class="${state.settings.personal_data ? '' : 'on'}">Выключен</button><button type="button" data-pd="1" class="${state.settings.personal_data ? 'on' : ''}">Включён</button></div>
       </div>` : ''}
-      <div class="card" style="margin-top:24px;font-size:14px;line-height:1.55;color:#B5B5BA">
-        Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.
-      </div>
-      <div class="card" style="margin-top:10px;font-size:14px;line-height:1.55;color:#B5B5BA">
-        Совет: добавьте «Долю» на экран телефона. На iPhone — «Поделиться» → «На экран Домой», на Android — меню браузера → «Установить приложение».
-      </div>
+      <details class="card fold" data-fold="p-help" style="margin-top:10px" ${foldOpen('p-help', false) ? 'open' : ''}>
+        <summary><div style="flex:1;font-weight:500">Как это работает</div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
+        <div style="font-size:14px;line-height:1.55;color:#B5B5BA">Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.</div>
+        <div style="font-size:14px;line-height:1.55;color:#B5B5BA;margin-top:10px">Совет: добавьте «Долю» на экран телефона. На iPhone — «Поделиться» → «На экран Домой», на Android — меню браузера → «Установить приложение».</div>
+      </details>
       ${state.bot ? (state.me.telegram
         ? `<div class="card" style="margin-top:10px;display:flex;align-items:center;gap:10px;font-size:14px"><span class="gold" style="display:inline-flex">${I.check}</span>Telegram подключён${state.me.tg_username ? ` · @${esc(state.me.tg_username)}` : ''}. Уведомления приходят в бот.</div>`
         : `<div class="card" style="margin-top:10px;font-size:14px;line-height:1.5;color:#B5B5BA">Подключите Telegram, чтобы получать уведомления о расходах, долях и удалении и входить в Долю прямо из бота.<button class="btn sm" id="tglink" style="margin-top:12px;display:flex">Подключить Telegram</button></div>`) : ''}
@@ -541,6 +559,7 @@ function viewProfile() {
     </div>
     ${tabbar('profile', null)}`;
   bindLang();
+  bindFolds();
   const pd = app.querySelector('#pd');
   if (pd) pd.onsubmit = async (e) => {
     e.preventDefault();
@@ -713,9 +732,9 @@ async function viewObject(id, filter = 'all') {
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
       ${o.installment ? (() => {
         const ins = o.installment;
-        return `<div class="card" style="margin-top:16px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Рассрочка</span><span class="muted" style="font-size:12px">${pct(ins.pct)}</span></div>
-          <div class="bar" style="height:6px;margin-top:10px"><i style="width:${ins.pct}%"></i></div>
+        return `<details class="card fold" data-fold="inst" style="margin-top:16px" ${foldOpen('inst', false) ? 'open' : ''}>
+          <summary><div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Рассрочка</span><span style="font-size:13px">осталось <b class="num">${money(ins.left)}</b></span></div>
+          <div class="bar" style="height:6px;margin-top:10px"><i style="width:${ins.pct}%"></i></div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
             <div><div class="muted" style="font-size:11px">Выплачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.paid)}</div></div>
             <div><div class="muted" style="font-size:11px">Осталось</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(ins.left)}</div></div>
@@ -725,19 +744,20 @@ async function viewObject(id, filter = 'all') {
           ${ins.payments_left !== null && ins.left > 0 ? `<div class="muted" style="font-size:12px;margin-top:8px">≈ ${ins.payments_left} ${plural(ins.payments_left, 'платёж', 'платежа', 'платежей')} по ${money(ins.monthly)}</div>` : ''}
           ${ins.left <= 0 && ins.total ? '<div class="gold" style="font-size:13px;margin-top:8px">Рассрочка полностью выплачена</div>' : ''}
           ${me.canAdd && me.role !== 'foreman' && ins.left > 0 ? `<a class="btn sm" href="#/o/${id}/add/pay" style="margin-top:12px;width:100%">Внести платёж</a>` : ''}
-        </div>`;
+        </details>`;
       })() : ''}
       ${o.repair ? (() => {
         const rp = o.repair;
         const over = rp.budget > 0 && rp.spent > rp.budget;
-        return `<a class="card" href="#/o/${id}/forecast" style="display:block;margin-top:10px;color:var(--text)">
-          <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Ремонт</span><span style="font-size:12px" class="${over ? 'red' : 'muted'}">${rp.pct !== null ? pct(rp.pct) : 'без оценки'}</span></div>
-          <div class="bar" style="height:6px;margin-top:10px"><i class="${over ? 'over' : ''}" style="width:${rp.budget > 0 ? Math.min(100, rp.pct) : 100}%"></i></div>
+        return `<details class="card fold" data-fold="repair" style="margin-top:10px" ${foldOpen('repair', false) ? 'open' : ''}>
+          <summary><div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Ремонт</span><span style="font-size:13px" class="${over ? 'red' : ''}">${over ? 'перерасход' : rp.budget > 0 ? 'осталось' : 'потрачено'} <b class="num">${money(over ? -rp.left : rp.budget > 0 ? rp.left : rp.spent)}</b></span></div>
+          <div class="bar" style="height:6px;margin-top:10px"><i class="${over ? 'over' : ''}" style="width:${rp.budget > 0 ? Math.min(100, rp.pct) : 100}%"></i></div></div><span class="chev" aria-hidden="true">${I.chev}</span></summary>
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
             <div><div class="muted" style="font-size:11px">Потрачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(rp.spent)}</div></div>
             <div><div class="muted" style="font-size:11px">${over ? 'Перерасход' : 'Осталось'}</div><div class="display num ${over ? 'red' : ''}" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(Math.abs(rp.left)) : '—'}</div></div>
             <div><div class="muted" style="font-size:11px">Ориентир</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(rp.budget) : '—'}</div></div>
-          </div></a>`;
+          </div>
+          <a class="link-btn" href="#/o/${id}/forecast" style="display:block;margin-top:6px">Все расходы по статьям →</a></details>`;
       })() : ''}
       <div class="stats">
         <div class="stat"><div class="k">Вложено</div><div class="v">${fmt(c.totalInvested)}</div></div>
@@ -757,10 +777,13 @@ async function viewObject(id, filter = 'all') {
           <a href="#/o/${id}/members" class="muted">Участники · ${d.members.length}</a>
           <span style="display:flex;gap:16px"><a href="#/o/${id}/shares">Доли</a><a href="#/o/${id}/members">${me.isCreator ? 'Пригласить' : 'Все'}</a></span>
         </div>
-        <div class="rows">${d.members.map((m) => `
-          <div class="row" style="padding:9px 0">${avatar(m.user_id, m.name)}
+        ${(() => {
+          const row = (m) => `<div class="row" style="padding:9px 0">${avatar(m.user_id, m.name)}
             <div class="grow"><div class="t" style="font-size:14px">${meName(m)}</div><div class="s">${ROLE[m.role]}${m.user_id === o.creator_id ? ' · создатель' : ''}</div></div>
-            <div class="r num" style="font-size:13px">${memberLine(m)}</div></div>`).join('')}</div>
+            <div class="r num" style="font-size:13px">${memberLine(m)}</div></div>`;
+          const head = d.members.slice(0, 3), rest = d.members.slice(3);
+          return `<div class="rows">${head.map(row).join('')}</div>${rest.length ? `<details class="fold plain" data-fold="members-${id}" ${foldOpen('members-' + id, false) ? 'open' : ''}><summary class="more">Показать всех · ещё ${rest.length}</summary><div class="rows" style="border-top:1px solid #222225">${rest.map(row).join('')}</div></details>` : ''}`;
+        })()}
       </div>
 
       ${o.contract && o.contract.fixed ? `<a class="card ${o.contract.all_signed ? 'green' : 'gold'}" href="#/o/${id}/contract" style="display:flex;align-items:center;gap:12px;margin-top:10px;color:var(--text)">
@@ -774,10 +797,30 @@ async function viewObject(id, filter = 'all') {
 
       <div class="section-h"><h2>Операции</h2>${me.canAdd ? `<a class="pill" href="#/o/${id}/add">${I.plusSm}Добавить</a>` : ''}</div>
       <div class="chips" style="margin-bottom:6px">${filters.map(([k, l]) => `<button data-f="${k}" class="${k === filter ? 'on' : ''}">${l}</button>`).join('')}</div>
-      ${entries.length ? `<div class="rows">${entries.map(entryRow).join('')}</div>` : `<div class="empty">${filter === 'all' ? 'Операций пока нет.' : 'Нет операций этого типа.'}${me.canAdd && filter === 'all' ? '<br>Добавьте взнос, расход или плановую сумму.' : ''}</div>`}
+      ${entries.length ? (() => {
+        if (entries.length <= 6) return `<div class="rows">${entries.map(entryRow).join('')}</div>`;
+        const groups = [];
+        for (const e of entries) {
+          const k = (e.entry_date || '').slice(0, 7);
+          let g = groups[groups.length - 1];
+          if (!g || g.k !== k) { g = { k, items: [] }; groups.push(g); }
+          g.items.push(e);
+        }
+        return groups.map((g, gi) => {
+          const sumOut = g.items.filter((e) => e.kind === 'out').reduce((s, e) => s + e.amount, 0);
+          const sumIn = g.items.filter((e) => e.kind === 'in').reduce((s, e) => s + e.amount, 0);
+          const pending = g.items.some((e) => e.need_my_vote);
+          return `<details class="fold month" data-fold="m-${id}-${g.k}" ${foldOpen(`m-${id}-${g.k}`, gi === 0 || pending) ? 'open' : ''}>
+            <summary><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${monthTitle(g.k)}</div>
+              <div class="muted" style="font-size:12px;margin-top:2px">${g.items.length} ${plural(g.items.length, 'операция', 'операции', 'операций')}${sumOut ? ` · −${fmt(sumOut)}\u00A0€` : ''}${sumIn ? ` · +${fmt(sumIn)}\u00A0€` : ''}${pending ? ' · <span class="red">нужен ваш ответ</span>' : ''}</div></div>
+              <span class="chev" aria-hidden="true">${I.chev}</span></summary>
+            <div class="rows">${g.items.map(entryRow).join('')}</div></details>`;
+        }).join('');
+      })() : `<div class="empty">${filter === 'all' ? 'Операций пока нет.' : 'Нет операций этого типа.'}${me.canAdd && filter === 'all' ? '<br>Добавьте взнос или расход.' : ''}</div>`}
     </div>
     ${tabbar('', me.canAdd ? `#/o/${id}/add` : null)}`;
   on('[data-f]', 'click', (e) => viewObject(id, e.currentTarget.dataset.f));
+  bindFolds();
 }
 
 async function viewAdd(id, presetKind) {
