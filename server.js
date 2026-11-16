@@ -112,6 +112,7 @@ async function currentUser(req) {
     [String(sid)]
   );
   if (u) { u.telegram = !!u.telegram_id; u.needs_name = needsName(u.name); u.is_admin = u.is_admin === true || u.is_admin === 't'; }
+  if (u) db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')`, [u.id]).catch(() => {});
   if (u) delete u.telegram_id;
   return u;
 }
@@ -414,6 +415,30 @@ route('GET', '/api/me', async ({ user }) => ({
   user: await myProfile(user.id), categories: CATEGORIES, bot: tg.username() || null,
   settings: { personal_data: await personalDataOn() }
 }));
+
+route('GET', '/api/admin/stats', async ({ user }) => {
+  if (!user.is_admin) fail(403, 'Только для администратора приложения');
+  const n = async (sql) => Number((await db.one(sql)).n);
+  const users = await db.query(
+    `SELECT u.id, u.name, u.tg_username, u.is_admin, (u.telegram_id IS NOT NULL) AS tg, to_char(u.created_at, 'YYYY-MM-DD') AS joined,
+            to_char(u.last_seen_at, 'YYYY-MM-DD') AS seen,
+            (SELECT COUNT(*) FROM members m WHERE m.user_id = u.id)::int AS objects
+     FROM users u ORDER BY u.created_at DESC LIMIT 500`
+  );
+  return {
+    users_total: await n('SELECT COUNT(*) AS n FROM users'),
+    users_tg: await n('SELECT COUNT(*) AS n FROM users WHERE telegram_id IS NOT NULL'),
+    users_new_7: await n(`SELECT COUNT(*) AS n FROM users WHERE created_at > now() - interval '7 days'`),
+    users_active_7: await n(`SELECT COUNT(*) AS n FROM users WHERE last_seen_at > now() - interval '7 days'`),
+    bot_total: await n('SELECT COUNT(*) AS n FROM (SELECT telegram_id::text AS t FROM bot_users UNION SELECT telegram_id::text FROM users WHERE telegram_id IS NOT NULL) x'),
+    bot_only: await n('SELECT COUNT(*) AS n FROM bot_users b WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.telegram_id::text = b.telegram_id)'),
+    objects_active: await n('SELECT COUNT(*) AS n FROM objects WHERE sold_at IS NULL'),
+    objects_closed: await n('SELECT COUNT(*) AS n FROM objects WHERE sold_at IS NOT NULL'),
+    offers: await n(`SELECT COUNT(*) AS n FROM market_offers WHERE status = 'approved'`),
+    investors: await n(`SELECT COUNT(*) AS n FROM investor_profiles WHERE status = 'approved'`),
+    users: users.map((u) => ({ id: Number(u.id), name: u.name, tg_username: u.tg_username, tg: u.tg === true || u.tg === 't', is_admin: u.is_admin === true || u.is_admin === 't', joined: u.joined, seen: u.seen, objects: Number(u.objects) }))
+  };
+});
 
 route('PUT', '/api/admin/settings', async ({ user, body }) => {
   if (!user.is_admin) fail(403, 'Только для администратора приложения');
@@ -1582,6 +1607,11 @@ async function handleWebhook(req, res) {
   if (!msg || !msg.chat || msg.chat.type !== 'private' || typeof msg.text !== 'string') return;
   const chatId = String(msg.chat.id);
   const from = msg.from || {};
+  if (from.id) db.query(
+    `INSERT INTO bot_users (telegram_id, username, first_name) VALUES ($1, $2, $3)
+     ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name, last_seen = now()`,
+    [String(from.id), from.username || null, String(from.first_name || '').slice(0, 80) || null]
+  ).catch(() => {});
   const [cmd, param = ''] = msg.text.trim().split(/\s+/);
   const known = await db.one('SELECT lang FROM users WHERE telegram_id = $1', [String(from.id)]).catch(() => null);
   const ro = known ? known.lang === 'ro' : String(from.language_code || '').startsWith('ro');

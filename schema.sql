@@ -258,3 +258,13 @@ CREATE TABLE IF NOT EXISTS market_responses (
   answered_at TIMESTAMPTZ,
   UNIQUE (offer_id, investor_id)
 );
+
+-- Статистика для администратора
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS bot_users (
+  telegram_id TEXT PRIMARY KEY,
+  username TEXT,
+  first_name TEXT,
+  first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);

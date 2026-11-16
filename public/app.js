@@ -326,7 +326,9 @@ async function viewHome() {
         ${active.some((o) => o.my_profit !== null) ? `<div class="chip">${I.trend}Прибыль ≈ ${signed(t.profit)} €</div>` : ''}
         ${history.length ? `<div class="chip" style="color:#8FC9A3">${I.check}Заработано ${signed(t.earned)} €</div>` : ''}
       </div>
-      ${active.length ? '' : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+      ${active.length ? `<a class="card" href="#/market" style="display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:14px;padding-bottom:14px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
+        <span class="gold" style="display:inline-flex;width:24px;height:24px">${I.deals}</span>
+        <div style="flex:1;font-size:14px"><b style="font-weight:600">Доска сделок</b> <span class="muted">· найти инвестора или сделку</span></div>${I.chev}</a>` : `<a class="card" href="#/market" style="display:flex;align-items:center;gap:14px;margin-top:18px;color:var(--text);background:linear-gradient(135deg,#221E16,#17171A);border-color:#3A3324">
         <span class="gold" style="display:inline-flex;width:28px;height:28px">${I.deals}</span>
         <div style="flex:1"><div style="font-size:15px;font-weight:600">Хочу стать инвестором</div><div class="muted" style="font-size:12px;line-height:1.4;margin-top:2px">Есть деньги — найдите сделку. Есть объект — найдите инвестора.</div></div>${I.chev}</a>`}
       <div class="section-h"><h2>Объекты</h2><a class="pill" href="#/new">${I.plusSm}Объект</a></div>
@@ -573,6 +575,8 @@ function viewProfile() {
       </form></details>` : ''}
       ${state.me.is_admin ? `
       <div class="label">Администрирование</div>
+      <a class="card" href="#/admin/users" id="adm-stats" style="display:flex;align-items:center;gap:12px;margin-bottom:10px;color:var(--text)">
+        <div style="flex:1"><div class="muted" style="font-size:12px">Пользователи</div><div class="display num" style="font-size:22px;font-weight:600;margin-top:2px" id="adm-total">…</div><div class="muted" style="font-size:12px;margin-top:2px" id="adm-sub"></div></div>${I.chev}</a>
       <div class="card">
         <div style="font-size:15px;font-weight:500">Ввод личных данных</div>
         <div class="muted" style="font-size:12px;line-height:1.45;margin-top:4px">Телефон, дата рождения, IDNP и адрес. Когда выключено, поля скрыты у всех, договор подписывается без них, а в тексте остаются пустые строки, чтобы вписать от руки.</div>
@@ -588,7 +592,7 @@ function viewProfile() {
         : `<div class="card" style="margin-top:10px;font-size:14px;line-height:1.5;color:#B5B5BA">Подключите Telegram, чтобы получать уведомления о расходах, долях и удалении и входить в Долю прямо из бота.<button class="btn sm" id="tglink" style="margin-top:12px;display:flex">Подключить Telegram</button></div>`) : ''}
       ${TG ? '' : '<button class="btn ghost" id="out" style="margin-top:24px">Выйти</button>'}
     </div>
-    ${tabbar('profile', null)}`;
+    ${tabbar('profile', '#/new')}`;
   bindLang();
   bindFolds();
   const pd = app.querySelector('#pd');
@@ -600,6 +604,11 @@ function viewProfile() {
       toast('Сохранено', true);
     } catch (ex) { toast(ex.message); }
   };
+  if (state.me.is_admin) api('GET', '/api/admin/stats').then((st) => {
+    const t = app.querySelector('#adm-total'); if (!t) return;
+    t.textContent = st.users_total;
+    app.querySelector('#adm-sub').textContent = `${I18N.tr('за 7 дней:')} +${st.users_new_7} · ${I18N.tr('активны')} ${st.users_active_7} · ${I18N.tr('в боте')} ${st.bot_total}`;
+  }).catch(() => {});
   on('[data-pd]', 'click', async (e) => {
     const onState = e.currentTarget.dataset.pd === '1';
     try {
@@ -1757,7 +1766,7 @@ async function viewMarket(tab) {
         ${myApproved.length ? '' : '<div class="muted" style="font-size:12px;line-height:1.45;margin-bottom:4px">Чтобы предложить сделку инвестору, сначала опубликуйте её во вкладке «Сделки».</div>'}
         ${d.investors.length ? d.investors.map(investorCard).join('') : '<div class="card empty">Пока нет опубликованных анкет инвесторов.</div>'}`}
     </div>
-    ${tabbar('market', null)}`;
+    ${tabbar('market', '#/market/new')}`;
   on('[data-mt]', 'click', (e) => go(e.currentTarget.dataset.mt === 'investors' ? '#/market/investors' : '#/market'));
   on('[data-propose]', 'click', (e) => proposeSheet(Number(e.currentTarget.dataset.propose), myApproved));
 }
@@ -1958,7 +1967,27 @@ async function viewMarketAdmin() {
   on('[data-ok]', 'click', (e) => { const b = e.currentTarget.dataset; moderate(b.k, b.id, b.ok === '1', viewMarketAdmin); });
 }
 
+
+async function viewAdminUsers() {
+  if (!state.me.is_admin) return go('#/profile');
+  const st = await api('GET', '/api/admin/stats');
+  const tile = (k, v, sub) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="muted" style="font-size:11px;margin-top:2px">${sub}</div>` : ''}</div>`;
+  app.innerHTML = `
+    <div class="screen no-tab">
+      <div class="topbar">${backBtn('#/profile')}<div class="title"><b>Пользователи</b><small>статистика Доли</small></div><div class="spacer44"></div></div>
+      <div class="stats" style="margin-top:18px">${tile('Всего', st.users_total, `+${st.users_new_7} за 7 дней`)}${tile('Активны', st.users_active_7, 'за 7 дней')}${tile('В боте', st.bot_total, st.bot_only ? `${st.bot_only} без входа` : 'все вошли')}</div>
+      <div class="stats" style="margin-top:8px">${tile('Объекты', st.objects_active, 'в работе')}${tile('Продано', st.objects_closed, 'сделок')}${tile('Доска', st.offers + st.investors, `${st.offers} ${plural(st.offers, 'сделка', 'сделки', 'сделок')} · ${st.investors} инв.`)}</div>
+      <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">«В боте» — все, кто открывал бота${state.bot ? ` <span data-nt>@${esc(state.bot)}</span>` : ''}; «без входа» — написали боту, но ещё не открыли приложение. Подсчёт написавших боту ведётся с этого обновления.</div>
+      <div class="label" style="display:flex;justify-content:space-between"><span>Зарегистрированы</span><span>${st.users.length}</span></div>
+      <div class="card list">${st.users.map((u) => `<div class="row">${avatar(u.id, u.name)}
+        <div class="grow"><div class="t" style="font-size:14px">${esc(u.name)}${u.is_admin ? ' <span class="badge gold">админ</span>' : ''}</div>
+          <div class="s">${u.tg_username ? `<span data-nt>@${esc(u.tg_username)}</span>` : u.tg ? 'Telegram' : 'email'} · ${dateRu(u.joined)}${u.seen ? ` · ${I18N.tr('был')} ${dateRu(u.seen)}` : ''}</div></div>
+        <div class="r"><div class="num" style="font-size:14px">${u.objects}</div><div class="muted" style="font-size:11px">${plural(u.objects, 'объект', 'объекта', 'объектов')}</div></div></div>`).join('')}</div>
+    </div>`;
+}
+
 const routes = [
+  [/^#\/admin\/users$/, () => viewAdminUsers()],
   [/^#\/market$/, () => viewMarket('deals')],
   [/^#\/market\/investors$/, () => viewMarket('investors')],
   [/^#\/market\/profile$/, () => viewMarketProfile()],
