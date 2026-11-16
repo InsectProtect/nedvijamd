@@ -102,3 +102,6 @@ CREATE TABLE IF NOT EXISTS entry_delete_votes (
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (entry_id, user_id)
 );
+
+-- Ориентировочная стоимость ремонта
+ALTER TABLE objects ADD COLUMN IF NOT EXISTS repair_budget NUMERIC;

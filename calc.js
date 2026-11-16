@@ -47,13 +47,14 @@ function computeObject(object, members, entries) {
     }
   }
 
-  // Стоимость покупки из карточки объекта — это план по статье «Покупка»
-  const purchase = n(object.purchase_price);
-  if (purchase > 0) {
-    const c = catOf('Покупка');
-    if (purchase > c.plan) {
-      planTotal += purchase - c.plan;
-      c.plan = purchase;
+  // Стоимость покупки и бюджет ремонта из карточки объекта — это план по статьям «Покупка» и «Ремонт»
+  for (const [cat, value] of [['Покупка', n(object.purchase_price)], ['Ремонт', n(object.repair_budget)]]) {
+    if (value > 0) {
+      const c = catOf(cat);
+      if (value > c.plan) {
+        planTotal += value - c.plan;
+        c.plan = value;
+      }
     }
   }
 

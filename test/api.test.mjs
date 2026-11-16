@@ -161,5 +161,14 @@ r = await A('PATCH', `/api/objects/${inst}`, { name: 'Рассрочка', purch
 r = await A('GET', `/api/objects/${inst}`);
 ok(r.data.object.installment === null, 'installment can be turned off');
 
+// бюджет ремонта
+r = await A('POST', '/api/objects', { name: 'Ремонт', purchase_price: 50000, repair_budget: 14000 });
+const rep = r.data.id;
+await A('POST', `/api/objects/${rep}/entries`, { kind: 'out', category: 'Ремонт', amount: 6500 });
+r = await A('GET', `/api/objects/${rep}`);
+const rp = r.data.object.repair;
+ok(rp && rp.budget === 14000 && rp.spent === 6500 && rp.left === 7500, 'repair progress: ' + JSON.stringify(rp));
+ok(r.data.calc.planTotal === 64000, 'repair budget goes to plan');
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

@@ -320,7 +320,7 @@ function viewProfile() {
 }
 
 async function viewObjectForm(id) {
-  let o = { name: '', area: '', status: 'покупка', purchase_price: '', sale_price: '', photo: null, installment: null, installment_monthly: '' };
+  let o = { name: '', area: '', status: 'покупка', purchase_price: '', sale_price: '', photo: null, installment: null, installment_monthly: '', repair_budget: '' };
   const ph = { data: null, preview: null, remove: false };
   if (id) {
     const d = await api('GET', `/api/objects/${id}`);
@@ -349,6 +349,8 @@ async function viewObjectForm(id) {
           <input class="field" id="monthly" inputmode="decimal" value="${esc(o.installment_monthly ?? '')}" placeholder="Необязательно — для расчёта, сколько платежей осталось">
           <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.45">«Стоимость покупки» — полная сумма по договору рассрочки. Каждый платёж вносите как расход в категории «Покупка» — приложение покажет, сколько выплачено и сколько осталось.</div>
         </div>
+        <label class="label" for="repair">Ориентировочная стоимость ремонта, €</label>
+        <input class="field" id="repair" inputmode="decimal" value="${esc(o.repair_budget ?? '')}" placeholder="Если ремонт планируется">
         <label class="label" for="status">Статус</label>
         <select class="field" id="status">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
         <label class="label" for="sale">Ориентировочная цена продажи, €</label>
@@ -394,6 +396,7 @@ async function viewObjectForm(id) {
       purchase_price: app.querySelector('#buy').value.replace(/\s/g, '').replace(',', '.'),
       sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.'),
       installment: inst,
+      repair_budget: app.querySelector('#repair').value.replace(/\s/g, '').replace(',', '.'),
       installment_monthly: app.querySelector('#monthly').value.replace(/\s/g, '').replace(',', '.')
     };
     try {
@@ -457,6 +460,18 @@ async function viewObject(id, filter = 'all') {
           ${ins.left <= 0 && ins.total ? '<div class="gold" style="font-size:13px;margin-top:8px">Рассрочка полностью выплачена</div>' : ''}
           ${me.canAdd && me.role !== 'foreman' && ins.left > 0 ? `<a class="btn sm" href="#/o/${id}/add/pay" style="margin-top:12px;width:100%">Внести платёж</a>` : ''}
         </div>`;
+      })() : ''}
+      ${o.repair ? (() => {
+        const rp = o.repair;
+        const over = rp.budget > 0 && rp.spent > rp.budget;
+        return `<a class="card" href="#/o/${id}/forecast" style="display:block;margin-top:10px;color:var(--text)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:13px">Ремонт</span><span style="font-size:12px" class="${over ? 'red' : 'muted'}">${rp.pct !== null ? pct(rp.pct) : 'без оценки'}</span></div>
+          <div class="bar" style="height:6px;margin-top:10px"><i class="${over ? 'over' : ''}" style="width:${rp.budget > 0 ? Math.min(100, rp.pct) : 100}%"></i></div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
+            <div><div class="muted" style="font-size:11px">Потрачено</div><div class="display num gold" style="font-weight:600;font-size:16px;margin-top:4px">${fmt(rp.spent)}</div></div>
+            <div><div class="muted" style="font-size:11px">${over ? 'Перерасход' : 'Осталось'}</div><div class="display num ${over ? 'red' : ''}" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(Math.abs(rp.left)) : '—'}</div></div>
+            <div><div class="muted" style="font-size:11px">Ориентир</div><div class="display num" style="font-weight:600;font-size:16px;margin-top:4px">${rp.budget > 0 ? fmt(rp.budget) : '—'}</div></div>
+          </div></a>`;
       })() : ''}
       <div class="stats">
         <div class="stat"><div class="k">Вложено</div><div class="v">${fmt(c.totalInvested)}</div></div>
@@ -706,7 +721,7 @@ async function viewForecast(id) {
   const save = app.querySelector('#saveSale');
   if (save) save.onclick = async () => {
     try {
-      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, purchase_price: o.purchase_price, installment: !!o.installment, installment_monthly: o.installment_monthly, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
+      await api('PATCH', `/api/objects/${id}`, { name: o.name, area: o.area, status: o.status, purchase_price: o.purchase_price, installment: !!o.installment, installment_monthly: o.installment_monthly, repair_budget: o.repair_budget, sale_price: app.querySelector('#sale').value.replace(/\s/g, '').replace(',', '.') });
       delete state.cache[id];
       toast('Цена сохранена', true);
       viewForecast(id);

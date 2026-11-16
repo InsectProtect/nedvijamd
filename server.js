@@ -161,7 +161,7 @@ async function membership(objectId, userId) {
 
 async function loadObject(objectId) {
   const object = await db.one(
-    `SELECT id, name, area, status, purchase_price, sale_price, installment, installment_monthly, creator_id, delete_requested_at, created_at,
+    `SELECT id, name, area, status, purchase_price, sale_price, repair_budget, installment, installment_monthly, creator_id, delete_requested_at, created_at,
             (photo IS NOT NULL) AS has_photo, photo_v FROM objects WHERE id = $1`,
     [objectId]
   );
@@ -225,6 +225,17 @@ async function maybeFinishDelete(objectId) {
     return true;
   }
   return false;
+}
+
+const positiveOrNull = (v) => { const x = num(v); return Number.isFinite(x) && x > 0 ? x : null; };
+
+// Ремонт: потрачено по факту против ориентировочной стоимости
+function repairInfo(object, calc) {
+  const cat = calc.categories.find((c) => c.category === 'Ремонт');
+  const budget = cat ? cat.plan : 0;
+  const spent = cat ? cat.fact : 0;
+  if (!budget && !spent) return null;
+  return { budget, spent, left: Math.round((budget - spent) * 100) / 100, pct: budget > 0 ? Math.round((spent / budget) * 1000) / 10 : null };
 }
 
 // Рассрочка: выплачено = фактические расходы по статье «Покупка», всего = стоимость покупки
@@ -397,10 +408,10 @@ route('POST', '/api/objects', async ({ user, body }) => {
   const buy = num(body.purchase_price);
   const monthly = num(body.installment_monthly);
   const obj = await db.one(
-    `INSERT INTO objects (name, area, status, purchase_price, sale_price, installment, installment_monthly, creator_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    `INSERT INTO objects (name, area, status, purchase_price, sale_price, installment, installment_monthly, repair_budget, creator_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(buy) ? buy : null, Number.isFinite(sale) ? sale : null,
-      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, user.id]
+      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, positiveOrNull(body.repair_budget), user.id]
   );
   await saveObjectPhoto(obj.id, body);
   await db.query(
@@ -426,6 +437,8 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       photo: object.has_photo === true || object.has_photo === 't' ? `/api/objects/${object.id}/photo?v=${object.photo_v}` : null,
       installment: installmentInfo(object, calc),
       installment_monthly: num(object.installment_monthly),
+      repair_budget: num(object.repair_budget),
+      repair: repairInfo(object, calc),
       creator_id: Number(object.creator_id),
       delete_requested: !!object.delete_requested_at
     },
@@ -469,9 +482,9 @@ route('PATCH', '/api/objects/:id', async ({ user, params, body }) => {
   const buy = num(body.purchase_price);
   const monthly = num(body.installment_monthly);
   await db.query(
-    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4, purchase_price = $5, installment = $6, installment_monthly = $7 WHERE id = $8`,
+    `UPDATE objects SET name = $1, area = $2, status = $3, sale_price = $4, purchase_price = $5, installment = $6, installment_monthly = $7, repair_budget = $8 WHERE id = $9`,
     [name, Number.isFinite(area) ? area : null, str(body.status, 40) || 'покупка', Number.isFinite(sale) ? sale : null, Number.isFinite(buy) ? buy : null,
-      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, params.id]
+      body.installment === true, Number.isFinite(monthly) && monthly > 0 ? monthly : null, positiveOrNull(body.repair_budget), params.id]
   );
   await saveObjectPhoto(params.id, body);
   return { ok: true };
