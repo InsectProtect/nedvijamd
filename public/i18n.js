@@ -27,7 +27,7 @@
     '· вы': '· dvs.',
     'Язык': 'Limba',
     'Русский': 'Русский',
-    'Română': 'Română',
+    'Limba de stat': 'Limba de stat',
 
     // вход
     'Имя': 'Prenume',
@@ -395,7 +395,7 @@
     'Перерасход без согласия, %': 'Depășire fără acord, %',
     'Выплата после продажи, дней': 'Plata după vânzare, zile',
     'Сохранить данные договора': 'Salvează datele contractului',
-    'Текст договора · Română': 'Textul contractului · Română',
+    'Текст договора · Limba de stat': 'Textul contractului · Limba de stat',
     'Договор заполняется автоматически по данным объекта и участников. Это шаблон: перед подписанием покажите его юристу или нотариусу.': 'Contractul se completează automat după datele obiectului și ale participanților. Este un model: înainte de semnare arătați-l unui jurist sau notar.',
     'Отправить новую редакцию? Все подписи придётся поставить заново.': 'Trimiteți o redacție nouă? Toate semnăturile vor trebui puse din nou.',
     'Отправить договор участникам на подпись? Текст зафиксируется в текущем виде.': 'Trimiteți contractul participanților spre semnare? Textul se va fixa în forma actuală.',

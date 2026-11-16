@@ -60,7 +60,7 @@ const I = {
 const ask = (m) => confirm(I18N.tr(m));
 const langSwitch = () => `<div class="seg lang-seg" style="grid-template-columns:1fr 1fr" role="group" aria-label="Язык">
   <button type="button" data-lang="ru" class="${I18N.lang === 'ru' ? 'on' : ''}" data-nt>Русский</button>
-  <button type="button" data-lang="ro" class="${I18N.lang === 'ro' ? 'on' : ''}" data-nt>Română</button></div>`;
+  <button type="button" data-lang="ro" class="${I18N.lang === 'ro' ? 'on' : ''}" data-nt>Limba de stat</button></div>`;
 function bindLang() {
   app.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', async () => {
     const l = b.dataset.lang;
@@ -399,7 +399,7 @@ async function viewContract(id) {
         <button class="btn ghost sm" style="margin-top:14px;width:100%">Сохранить данные договора</button>
       </form>` : ''}
 
-      <div class="label" style="display:flex;justify-content:space-between;align-items:center"><span>Текст договора · Română</span><button class="link-btn" id="print">Распечатать / PDF</button></div>
+      <div class="label" style="display:flex;justify-content:space-between;align-items:center"><span>Текст договора · Limba de stat</span><button class="link-btn" id="print">Распечатать / PDF</button></div>
       <iframe id="doc" title="Acord de investiție comună" style="width:100%;height:70vh;border:0;border-radius:16px;background:#E9E7E1"></iframe>
       <div class="muted" style="font-size:12px;line-height:1.45;margin-top:10px">Договор заполняется автоматически по данным объекта и участников. Это шаблон: перед подписанием покажите его юристу или нотариусу.</div>
     </div>`;
