@@ -2,7 +2,17 @@
 /* Доля — клиент. Без сборки, без зависимостей. */
 
 const app = document.getElementById('app');
-const state = { me: null, categories: [], cache: {} };
+const state = { me: null, categories: [], cache: {}, bot: null };
+const TG = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
+const sessionToken = {
+  get() { try { return localStorage.getItem('dolya_session') || ''; } catch { return ''; } },
+  set(t) { try { t ? localStorage.setItem('dolya_session', t) : localStorage.removeItem('dolya_session'); } catch { /* приватный режим */ } }
+};
+function openExternal(url) {
+  if (TG && /^https:\/\/t\.me\//.test(url)) TG.openTelegramLink(url);
+  else if (TG) TG.openLink(url);
+  else window.open(url, '_blank', 'noopener');
+}
 
 // ---------- утилиты ----------
 const esc = (s) => String(s === null || s === undefined ? '' : s)
@@ -57,9 +67,11 @@ function toast(msg, good = false) {
 }
 
 async function api(method, path, body) {
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (sessionToken.get()) headers['X-Session'] = sessionToken.get();
   const r = await fetch(path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin'
   });
@@ -183,6 +195,7 @@ function viewAuth(mode) {
     try {
       const d = await api('POST', reg ? '/api/register' : '/api/login', body);
       state.me = d.user;
+      sessionToken.set(d.token);
       const inv = sessionStorage.getItem('invite');
       go(inv ? `#/join/${inv}` : '#/');
     } catch (ex) {
@@ -278,20 +291,29 @@ function viewProfile() {
     <div class="screen">
       <div class="topbar">${backBtn('#/')}<div class="spacer44"></div></div>
       <div style="display:flex;align-items:center;gap:14px;margin-top:20px">${avatar(state.me.id, state.me.name, 'lg')}
-        <div><div style="font-size:17px;font-weight:600">${esc(state.me.name)}</div><div class="muted" style="font-size:13px">${esc(state.me.email)}</div></div></div>
+        <div><div style="font-size:17px;font-weight:600">${esc(state.me.name)}</div><div class="muted" style="font-size:13px">${esc(state.me.email || (state.me.tg_username ? '@' + state.me.tg_username : 'вход через Telegram'))}</div></div></div>
       <div class="card" style="margin-top:24px;font-size:14px;line-height:1.55;color:#B5B5BA">
         Вы видите все операции по своим объектам, но вносите только свои. Доли ставит создатель объекта, удалить объект можно только с согласия всех участников сделки.
       </div>
       <div class="card" style="margin-top:10px;font-size:14px;line-height:1.55;color:#B5B5BA">
         Совет: добавьте «Долю» на экран телефона. На iPhone — «Поделиться» → «На экран Домой», на Android — меню браузера → «Установить приложение».
       </div>
-      <button class="btn ghost" id="out" style="margin-top:24px">Выйти</button>
+      ${state.bot ? (state.me.telegram
+        ? `<div class="card" style="margin-top:10px;display:flex;align-items:center;gap:10px;font-size:14px"><span class="gold" style="display:inline-flex">${I.check}</span>Telegram подключён${state.me.tg_username ? ` · @${esc(state.me.tg_username)}` : ''}. Уведомления приходят в бот.</div>`
+        : `<div class="card" style="margin-top:10px;font-size:14px;line-height:1.5;color:#B5B5BA">Подключите Telegram, чтобы получать уведомления о расходах, долях и удалении и входить в Долю прямо из бота.<button class="btn sm" id="tglink" style="margin-top:12px;display:flex">Подключить Telegram</button></div>`) : ''}
+      ${TG ? '' : '<button class="btn ghost" id="out" style="margin-top:24px">Выйти</button>'}
     </div>
     ${tabbar('profile', null)}`;
-  app.querySelector('#out').onclick = async () => {
+  const out = app.querySelector('#out');
+  if (out) out.onclick = async () => {
     await api('POST', '/api/logout');
+    sessionToken.set('');
     state.me = null;
     go('#/login');
+  };
+  const link = app.querySelector('#tglink');
+  if (link) link.onclick = async () => {
+    try { const r = await api('POST', '/api/tg-link'); openExternal(r.url); } catch (ex) { toast(ex.message); }
   };
 }
 
@@ -604,7 +626,7 @@ async function viewMembers(id) {
       <div class="card list" style="margin-top:20px">${d.members.map((m) => `
         <div class="row">${avatar(m.user_id, m.name)}
           <div class="grow"><div class="t">${esc(m.name)}${m.user_id === me.user_id ? ' <span class="muted" style="font-size:12px">(вы)</span>' : ''}</div>
-            <div class="s">${m.user_id === o.creator_id ? 'Создатель · ставит доли и доступ' : esc(m.email)}</div></div>
+            <div class="s">${m.user_id === o.creator_id ? 'Создатель · ставит доли и доступ' : esc(m.email || (m.tg_username ? '@' + m.tg_username : 'через Telegram'))}</div></div>
           ${me.isCreator && m.user_id !== o.creator_id
             ? `<select class="field" data-role="${m.user_id}" aria-label="Роль ${esc(m.name)}" style="width:auto;height:40px;font-size:13px;padding:0 34px 0 12px">${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === m.role ? 'selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('')}</select>
                <button class="icon-btn" data-rm="${m.user_id}" aria-label="Удалить ${esc(m.name)}" style="width:40px;height:40px">${I.close}</button>`
@@ -630,14 +652,18 @@ async function viewMembers(id) {
   if (mk) mk.onclick = async () => {
     try {
       const r = await api('POST', `/api/objects/${id}/invites`, { role: app.querySelector('#irole').value });
-      const url = `${location.origin}/#/join/${r.token}`;
+      const url = r.tg_url || `${location.origin}/#/join/${r.token}`;
+      const text = `Приглашение в объект «${o.name}» в Доле`;
       app.querySelector('#link').innerHTML = `
         <div class="field" style="display:flex;align-items:center;margin-top:12px;font-size:13px;color:#B5B5BA;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(url)}</div>
-        <div class="btn-row"><button class="btn ghost sm" style="flex:1" id="cp">Скопировать</button>${navigator.share ? '<button class="btn sm" style="flex:1" id="sh">Поделиться</button>' : ''}</div>
-        <div class="muted" style="font-size:12px;margin-top:8px">Ссылка действует 7 дней, роль: ${ROLE[r.role]}.</div>`;
+        ${r.tg_url ? '<button class="btn sm" style="width:100%;margin-top:10px" id="tgs">Отправить в Telegram</button>' : ''}
+        <div class="btn-row"><button class="btn ghost sm" style="flex:1" id="cp">Скопировать</button>${navigator.share && !TG ? `<button class="btn ${r.tg_url ? 'ghost ' : ''}sm" style="flex:1" id="sh">Поделиться</button>` : ''}</div>
+        <div class="muted" style="font-size:12px;margin-top:8px">Ссылка действует 7 дней, роль: ${ROLE[r.role]}.${r.tg_url ? ' Откроется в Telegram-боте.' : ''}</div>`;
+      const tgs = app.querySelector('#tgs');
+      if (tgs) tgs.onclick = () => openExternal(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
       app.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована', true); } catch { prompt('Скопируйте ссылку', url); } };
       const sh = app.querySelector('#sh');
-      if (sh) sh.onclick = () => navigator.share({ title: 'Доля', text: `Приглашение в объект «${o.name}»`, url }).catch(() => {});
+      if (sh) sh.onclick = () => navigator.share({ title: 'Доля', text, url }).catch(() => {});
     } catch (ex) { toast(ex.message); }
   };
 }
@@ -801,15 +827,48 @@ async function render() {
   go('#/');
 }
 
+function setupTelegram() {
+  TG.ready();
+  TG.expand();
+  try { TG.setHeaderColor('#0D0D0E'); TG.setBackgroundColor('#0D0D0E'); } catch { /* старый клиент */ }
+  const syncBack = () => {
+    const h = location.hash || '#/';
+    if (h === '#/' || h === '#') TG.BackButton.hide(); else TG.BackButton.show();
+  };
+  TG.BackButton.onClick(() => history.length > 1 ? history.back() : go('#/'));
+  window.addEventListener('hashchange', syncBack);
+  syncBack();
+}
+
 (async function boot() {
+  let startParam = '';
+  if (TG) {
+    setupTelegram();
+    try {
+      const d = await api('POST', '/api/tg-login', { initData: TG.initData });
+      state.me = d.user;
+      sessionToken.set(d.token);
+      startParam = d.startParam || '';
+    } catch (e) {
+      app.innerHTML = `<div class="auth-wrap"><div class="auth-logo">Доля</div><div class="lead">${esc(e.message)}</div></div>`;
+      return;
+    }
+  }
   try {
-    const d = await fetch('/api/me', { credentials: 'same-origin' });
+    const headers = sessionToken.get() ? { 'X-Session': sessionToken.get() } : {};
+    const d = await fetch('/api/me', { credentials: 'same-origin', headers });
     if (d.ok) {
       const j = await d.json();
       state.me = j.user;
       state.categories = j.categories;
+      state.bot = j.bot;
     }
   } catch { /* офлайн */ }
   window.addEventListener('hashchange', render);
+  if (startParam.startsWith('join_')) return go(`#/join/${startParam.slice(5)}`);
+  if (TG) {
+    const inv = sessionStorage.getItem('invite');
+    if (inv && (location.hash || '#/') === '#/') return go(`#/join/${inv}`);
+  }
   render();
 })();

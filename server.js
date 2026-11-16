@@ -4,6 +4,9 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
 const { computeObject, CATEGORIES } = require('./calc');
+const tg = require('./tg');
+
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -99,18 +102,48 @@ function positiveAmount(v) {
 // ---------- auth ----------
 
 async function currentUser(req) {
-  const sid = parseCookies(req).sid;
+  const sid = parseCookies(req).sid || req.headers['x-session'];
   if (!sid) return null;
-  return db.one(
-    'SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1',
-    [sid]
+  const u = await db.one(
+    'SELECT u.id, u.email, u.name, u.telegram_id, u.tg_username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1',
+    [String(sid)]
   );
+  if (u) u.telegram = !!u.telegram_id;
+  if (u) delete u.telegram_id;
+  return u;
 }
 
+// Сессия: cookie + токен в ответе (в Telegram WebView cookie иногда не сохраняются)
 async function startSession(req, res, userId) {
   const t = token(32);
   await db.query('INSERT INTO sessions (token, user_id) VALUES ($1, $2)', [t, userId]);
-  return sessionCookie(req, t, 60 * 60 * 24 * 180);
+  return { cookie: sessionCookie(req, t, 60 * 60 * 24 * 180), token: t };
+}
+
+const appUrl = (hashPath = '/') => `${PUBLIC_URL}/#${hashPath}`;
+
+// Уведомить участников объекта в Telegram (кроме автора действия)
+async function notifyObject(objectId, actorId, text, hashPath, onlyUserIds) {
+  if (!tg.enabled()) return;
+  try {
+    const rows = await db.query(
+      `SELECT u.id, u.telegram_id FROM members m JOIN users u ON u.id = m.user_id
+       WHERE m.object_id = $1 AND u.telegram_id IS NOT NULL`,
+      [objectId]
+    );
+    for (const r of rows) {
+      if (Number(r.id) === Number(actorId)) continue;
+      if (onlyUserIds && !onlyUserIds.includes(Number(r.id))) continue;
+      await tg.send(String(r.telegram_id), text, PUBLIC_URL ? appUrl(hashPath) : null);
+    }
+  } catch (e) {
+    console.warn('notify failed', e.message);
+  }
+}
+
+async function objectName(objectId) {
+  const o = await db.one('SELECT name FROM objects WHERE id = $1', [objectId]);
+  return o ? o.name : '';
 }
 
 // ---------- object access ----------
@@ -133,7 +166,7 @@ async function loadObject(objectId) {
   );
   if (!object) fail(404, 'Объект не найден');
   const members = await db.query(
-    `SELECT m.user_id, m.role, m.share_pct, m.foreman_mode, m.foreman_value, m.delete_vote, u.name, u.email
+    `SELECT m.user_id, m.role, m.share_pct, m.foreman_mode, m.foreman_value, m.delete_vote, u.name, u.email, u.tg_username
      FROM members m JOIN users u ON u.id = m.user_id WHERE m.object_id = $1 ORDER BY m.joined_at, m.user_id`,
     [objectId]
   );
@@ -153,6 +186,7 @@ function memberView(m, calc) {
     user_id: Number(m.user_id),
     name: m.name,
     email: m.email,
+    tg_username: m.tg_username || null,
     role: m.role,
     share_pct: Number(m.share_pct),
     foreman_mode: m.foreman_mode,
@@ -160,6 +194,19 @@ function memberView(m, calc) {
     delete_vote: m.delete_vote === true || m.delete_vote === 't',
     invested: calc.invested[m.user_id] || 0,
     payout: calc.payout[m.user_id] === undefined ? null : calc.payout[m.user_id]
+  };
+}
+
+const fmtEur = (v) => `${Math.round(Number(v) || 0).toLocaleString('ru-RU').replace(/\s/g, '\u00A0')}\u00A0€`;
+
+async function deleteRecipients(objectId) {
+  const rows = await db.query(
+    `SELECT u.id, u.telegram_id, m.role FROM members m JOIN users u ON u.id = m.user_id WHERE m.object_id = $1`,
+    [objectId]
+  );
+  return {
+    voters: rows.filter((r) => r.role !== 'viewer').map((r) => Number(r.id)),
+    all: rows.filter((r) => r.telegram_id).map((r) => ({ id: Number(r.id), telegram_id: String(r.telegram_id) }))
   };
 }
 
@@ -215,16 +262,16 @@ route('POST', '/api/register', async ({ req, body }) => {
     'INSERT INTO users (email, name, pass_hash) VALUES ($1, $2, $3) RETURNING id, email, name',
     [email, name, hashPassword(password)]
   );
-  const cookie = await startSession(req, null, user.id);
-  return { status: 200, data: { user }, headers: { 'Set-Cookie': cookie } };
+  const sess = await startSession(req, null, user.id);
+  return { status: 200, data: { user, token: sess.token }, headers: { 'Set-Cookie': sess.cookie } };
 }, { auth: false });
 
 route('POST', '/api/login', async ({ req, body }) => {
   const email = str(body.email, 200).toLowerCase();
   const user = await db.one('SELECT id, email, name, pass_hash FROM users WHERE email = $1', [email]);
   if (!user || !checkPassword(String(body.password || ''), user.pass_hash)) fail(401, 'Неверный email или пароль');
-  const cookie = await startSession(req, null, user.id);
-  return { status: 200, data: { user: { id: user.id, email: user.email, name: user.name } }, headers: { 'Set-Cookie': cookie } };
+  const sess = await startSession(req, null, user.id);
+  return { status: 200, data: { user: { id: user.id, email: user.email, name: user.name }, token: sess.token }, headers: { 'Set-Cookie': sess.cookie } };
 }, { auth: false });
 
 route('POST', '/api/logout', async ({ req }) => {
@@ -233,7 +280,38 @@ route('POST', '/api/logout', async ({ req }) => {
   return { status: 200, data: { ok: true }, headers: { 'Set-Cookie': sessionCookie(req, '', 0) } };
 }, { auth: false });
 
-route('GET', '/api/me', async ({ user }) => ({ user, categories: CATEGORIES }));
+route('GET', '/api/me', async ({ user }) => ({ user, categories: CATEGORIES, bot: tg.username() || null }));
+
+// Вход из Telegram Mini App: проверяем подпись initData, находим или создаём аккаунт
+route('POST', '/api/tg-login', async ({ req, body }) => {
+  const v = tg.verifyInitData(String(body.initData || ''));
+  if (!v) fail(401, 'Не удалось подтвердить вход через Telegram');
+  const tu = v.user;
+  const name = [tu.first_name, tu.last_name].filter(Boolean).join(' ').slice(0, 80) || tu.username || 'Без имени';
+  let user = await db.one('SELECT id, email, name FROM users WHERE telegram_id = $1', [String(tu.id)]);
+  if (!user) {
+    user = await db.one(
+      'INSERT INTO users (name, telegram_id, tg_username) VALUES ($1, $2, $3) RETURNING id, email, name',
+      [name, String(tu.id), tu.username || null]
+    );
+  } else {
+    await db.query('UPDATE users SET tg_username = $1 WHERE id = $2', [tu.username || null, user.id]);
+  }
+  const sess = await startSession(req, null, user.id);
+  return {
+    status: 200,
+    data: { user: { ...user, telegram: true, tg_username: tu.username || null }, token: sess.token, startParam: v.startParam },
+    headers: { 'Set-Cookie': sess.cookie }
+  };
+}, { auth: false });
+
+// Привязать Telegram к аккаунту, созданному через email
+route('POST', '/api/tg-link', async ({ user }) => {
+  if (!tg.enabled() || !tg.username()) fail(400, 'Telegram-бот не настроен');
+  const t = token(18);
+  await db.query(`INSERT INTO tg_links (token, user_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')`, [t, user.id]);
+  return { url: `https://t.me/${tg.username()}?start=link_${t}` };
+});
 
 route('GET', '/api/objects', async ({ user }) => {
   const rows = await db.query(
@@ -373,6 +451,15 @@ route('PUT', '/api/objects/:id/shares', async ({ user, params, body }) => {
       [pct, mode, val, params.id, uid]
     );
   }
+  const lines = members.map((m) => {
+    const u = updates.find((x) => Number(x[0]) === Number(m.user_id));
+    if (!u) return null;
+    if (m.role === 'investor') return `• ${tg.escHtml(m.name)} — ${u[1]} %`;
+    return `• ${tg.escHtml(m.name)}, прораб — ${u[2] === 'pct' ? `${u[3]} % прибыли` : u[2] === 'fix' ? fmtEur(u[3]) : 'без доли'}`;
+  }).filter(Boolean);
+  notifyObject(params.id, user.id,
+    `🏠 <b>${tg.escHtml(await objectName(params.id))}</b>\n${tg.escHtml(user.name)} изменил доли:\n${lines.join('\n')}`,
+    `/o/${params.id}/shares`);
   return { ok: true };
 });
 
@@ -385,7 +472,7 @@ route('POST', '/api/objects/:id/invites', async ({ user, params, body }) => {
     `INSERT INTO invites (token, object_id, role, created_by, expires_at) VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
     [t, params.id, role, user.id]
   );
-  return { token: t, role };
+  return { token: t, role, tg_url: tg.username() ? `https://t.me/${tg.username()}?start=join_${t}` : null };
 });
 
 route('GET', '/api/invites/:token', async ({ params }) => {
@@ -414,6 +501,10 @@ route('POST', '/api/invites/:token/accept', async ({ user, params }) => {
     // Новый участник сбрасывает незавершённое голосование за удаление
     await db.query(`UPDATE members SET delete_vote = false WHERE object_id = $1`, [inv.object_id]);
     await db.query(`UPDATE objects SET delete_requested_at = NULL WHERE id = $1`, [inv.object_id]);
+    const roleName = { investor: 'инвестор', foreman: 'прораб', viewer: 'просмотр' }[inv.role];
+    notifyObject(inv.object_id, user.id,
+      `🏠 <b>${tg.escHtml(await objectName(inv.object_id))}</b>\n👤 ${tg.escHtml(user.name)} присоединился (${roleName})`,
+      `/o/${inv.object_id}/members`);
   }
   return { object_id: inv.object_id };
 });
@@ -462,6 +553,15 @@ route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
     [params.id, user.id, kind, source, category, amount, str(body.note, 300) || null, date]
   );
   if (kind === 'out') await savePhotos(entry.id, user.id, body.photos);
+  if (kind !== 'plan') {
+    const name = await objectName(params.id);
+    const photos = kind === 'out' && Array.isArray(body.photos) ? body.photos.length : 0;
+    const what = kind === 'in' ? `внёс взнос <b>${fmtEur(amount)}</b>` : `добавил расход <b>${fmtEur(amount)}</b> · ${tg.escHtml(category)}`;
+    const note = str(body.note, 300);
+    notifyObject(params.id, user.id,
+      `🏠 <b>${tg.escHtml(name)}</b>\n${tg.escHtml(user.name)} ${what}${note ? `\n«${tg.escHtml(note)}»` : ''}${photos ? `\n🧾 Чеков: ${photos}` : ''}`,
+      `/e/${entry.id}`);
+  }
   return { id: entry.id };
 });
 
@@ -520,7 +620,14 @@ route('POST', '/api/objects/:id/delete-request', async ({ user, params }) => {
   if (!me.isCreator) fail(403, 'Запросить удаление может только создатель');
   await db.query(`UPDATE objects SET delete_requested_at = now() WHERE id = $1`, [params.id]);
   await db.query(`UPDATE members SET delete_vote = (user_id = $2) WHERE object_id = $1`, [params.id, user.id]);
+  const name = await objectName(params.id);
+  const recipients = await deleteRecipients(params.id);
   const deleted = await maybeFinishDelete(params.id);
+  if (!deleted) {
+    notifyObject(params.id, user.id,
+      `⚠️ <b>${tg.escHtml(name)}</b>\n${tg.escHtml(user.name)} запросил удаление объекта. Объект удалится, только если согласятся все участники сделки.`,
+      `/o/${params.id}/delete`, recipients.voters);
+  }
   return { deleted };
 });
 
@@ -530,9 +637,19 @@ route('POST', '/api/objects/:id/delete-vote', async ({ user, params, body }) => 
   if (me.role === 'viewer') fail(403, 'Роль «Просмотр» не голосует');
   if (body.agree === true) {
     await db.query(`UPDATE members SET delete_vote = true WHERE object_id = $1 AND user_id = $2`, [params.id, user.id]);
+    const name = await objectName(params.id);
+    const recipients = await deleteRecipients(params.id);
     const deleted = await maybeFinishDelete(params.id);
+    if (deleted) {
+      for (const r of recipients.all) {
+        if (r.id !== Number(user.id)) tg.send(r.telegram_id, `🗑 Объект <b>${tg.escHtml(name)}</b> удалён: все участники согласились.`, null);
+      }
+    }
     return { deleted };
   }
+  notifyObject(params.id, user.id,
+    `🏠 <b>${tg.escHtml(await objectName(params.id))}</b>\n${tg.escHtml(user.name)} против удаления — запрос отменён.`,
+    `/o/${params.id}`);
   // Любой отказ отменяет запрос целиком
   await db.query(`UPDATE objects SET delete_requested_at = NULL WHERE id = $1`, [params.id]);
   await db.query(`UPDATE members SET delete_vote = false WHERE object_id = $1`, [params.id]);
@@ -584,6 +701,58 @@ async function serveExport(req, res, id) {
   res.end(body);
 }
 
+// ---------- Telegram-бот ----------
+
+async function handleWebhook(req, res) {
+  if (!tg.enabled() || req.headers['x-telegram-bot-api-secret-token'] !== tg.webhookSecret()) {
+    res.writeHead(403);
+    return res.end();
+  }
+  const update = await readBody(req);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end('{}');
+  const msg = update.message;
+  if (!msg || !msg.chat || msg.chat.type !== 'private' || typeof msg.text !== 'string') return;
+  const chatId = String(msg.chat.id);
+  const from = msg.from || {};
+  const [cmd, param = ''] = msg.text.trim().split(/\s+/);
+  if (cmd !== '/start') {
+    return tg.send(chatId, 'Откройте «Долю» кнопкой ниже.', PUBLIC_URL ? appUrl('/') : null, 'Открыть Долю');
+  }
+  try {
+    if (param.startsWith('link_')) {
+      const link = await db.one(`SELECT user_id FROM tg_links WHERE token = $1 AND expires_at > now()`, [param.slice(5)]);
+      if (!link) return tg.send(chatId, 'Ссылка для привязки устарела. Создайте новую в профиле.', null);
+      const taken = await db.one('SELECT id FROM users WHERE telegram_id = $1', [String(from.id)]);
+      if (taken && Number(taken.id) !== Number(link.user_id)) {
+        return tg.send(chatId, 'Этот Telegram уже привязан к другому аккаунту Доли.', null);
+      }
+      await db.query('UPDATE users SET telegram_id = $1, tg_username = $2 WHERE id = $3', [String(from.id), from.username || null, link.user_id]);
+      await db.query('DELETE FROM tg_links WHERE token = $1', [param.slice(5)]);
+      return tg.send(chatId, '✅ Telegram привязан. Теперь вы будете получать уведомления и можете входить в Долю прямо отсюда.', PUBLIC_URL ? appUrl('/') : null, 'Открыть Долю');
+    }
+    if (param.startsWith('join_')) {
+      const t = param.slice(5);
+      const inv = await db.one(
+        `SELECT i.role, o.name AS object_name, u.name AS inviter FROM invites i
+         JOIN objects o ON o.id = i.object_id JOIN users u ON u.id = i.created_by
+         WHERE i.token = $1 AND i.expires_at > now()`,
+        [t]
+      );
+      if (!inv) return tg.send(chatId, 'Приглашение не найдено или истекло. Попросите новую ссылку.', null);
+      const roleName = { investor: 'инвестор', foreman: 'прораб', viewer: 'просмотр' }[inv.role];
+      return tg.send(chatId,
+        `${tg.escHtml(inv.inviter)} приглашает вас в объект <b>${tg.escHtml(inv.object_name)}</b> с ролью «${roleName}».`,
+        PUBLIC_URL ? appUrl(`/join/${t}`) : null, 'Присоединиться');
+    }
+    return tg.send(chatId,
+      '<b>Доля</b> — учёт совместных вложений в недвижимость: кто сколько вложил, план и факт расходов, чеки, доли и прогноз прибыли.\n\nСюда будут приходить уведомления по вашим объектам.',
+      PUBLIC_URL ? appUrl('/') : null, 'Открыть Долю');
+  } catch (e) {
+    console.warn('webhook error', e.message);
+  }
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -622,6 +791,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (pathname === '/healthz') return send(res, 200, { ok: true });
     let m;
+    if (req.method === 'POST' && pathname === '/tg/webhook') return await handleWebhook(req, res);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/receipts\/(\d+)\/image$/))) return await serveReceipt(req, res, m[1]);
     if (req.method === 'GET' && (m = pathname.match(/^\/api\/objects\/(\d+)\/export\.csv$/))) return await serveExport(req, res, m[1]);
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
@@ -655,7 +825,10 @@ async function main() {
   }
   // Чистим старые сессии
   await db.query(`DELETE FROM sessions WHERE created_at < now() - interval '180 days'`);
-  server.listen(PORT, () => console.log(`Доля запущена на порту ${PORT}`));
+  server.listen(PORT, () => {
+    console.log(`Доля запущена на порту ${PORT}`);
+    tg.setup(PUBLIC_URL).catch((e) => console.warn('telegram setup', e.message));
+  });
 }
 
 main().catch((e) => {

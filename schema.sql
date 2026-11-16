@@ -70,3 +70,15 @@ CREATE INDEX IF NOT EXISTS entries_object_idx ON entries(object_id);
 CREATE INDEX IF NOT EXISTS receipts_entry_idx ON receipts(entry_id);
 CREATE INDEX IF NOT EXISTS members_user_idx ON members(user_id);
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+
+-- Telegram
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tg_username TEXT;
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN pass_hash DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS tg_links (
+  token TEXT PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL
+);

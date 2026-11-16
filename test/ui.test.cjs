@@ -16,7 +16,7 @@ require('fs').mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
   const mk = async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-    await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com|telegram\.org/, (r) => r.abort());
     const p = await ctx.newPage();
     p.on('pageerror', (e) => console.log('PAGEERROR', e.message));
     p.on('dialog', (d) => d.accept());
@@ -47,13 +47,14 @@ require('fs').mkdirSync(OUT, { recursive: true });
   await a.goto(`${BASE}/#/o/${oid}/members`);
   await a.click('#mk');
   await a.waitForSelector('#link .field');
-  const link = (await a.textContent('#link .field')).trim();
+  const toWeb = (u) => u.includes('start=join_') ? `${BASE}/#/join/${u.split('start=join_')[1]}` : u;
+  const link = toWeb((await a.textContent('#link .field')).trim());
   await shot(a, '03-members-invite');
   // приглашение Игоря (прораб)
   await a.selectOption('#irole', 'foreman');
   await a.click('#mk');
   await a.waitForTimeout(300);
-  const link2 = (await a.textContent('#link .field')).trim();
+  const link2 = toWeb((await a.textContent('#link .field')).trim());
 
   const d = await mk();
   await d.goto(link);
