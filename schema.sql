@@ -94,3 +94,11 @@ ALTER TABLE objects ADD COLUMN IF NOT EXISTS photo_v INT NOT NULL DEFAULT 0;
 -- Рассрочка
 ALTER TABLE objects ADD COLUMN IF NOT EXISTS installment BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE objects ADD COLUMN IF NOT EXISTS installment_monthly NUMERIC;
+
+-- Удаление операции только с согласия всех участников сделки
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS entry_delete_votes (
+  entry_id INT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (entry_id, user_id)
+);

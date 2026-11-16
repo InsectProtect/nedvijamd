@@ -105,6 +105,34 @@ ok(r.status === 401, 'receipt hidden from anonymous');
 r = await A('GET', '/api/objects');
 ok(r.data.objects.length === 1 && r.data.totals.invested === 44000 && r.data.totals.profit === 9495, 'home totals: ' + JSON.stringify(r.data.totals));
 
+// удаление операции с согласия всех
+r = await I('POST', `/api/objects/${oid}/entries`, { kind: 'out', amount: 300, note: 'Ошибка' });
+const bad = r.data.id;
+r = await D('DELETE', `/api/entries/${bad}`);
+ok(r.status === 403, 'only author can request entry deletion');
+r = await I('DELETE', `/api/entries/${bad}`);
+ok(r.data.pending === true && r.data.deleted === false, 'deletion request pending');
+r = await A('GET', `/api/objects/${oid}`);
+let be = r.data.entries.find((e) => e.id === bad);
+ok(be && be.delete_pending && be.need_my_vote, 'Артём sees pending entry needing his vote');
+ok(r.data.calc.factTotal === 71140 + 300, 'pending entry still counted');
+r = await B('POST', `/api/entries/${bad}/delete-vote`, { agree: true });
+ok(r.status === 403, 'viewer cannot vote on entry');
+r = await D('POST', `/api/entries/${bad}/delete-vote`, { agree: true });
+ok(r.data.deleted === false, 'Денис agreed, still waiting');
+r = await A('POST', `/api/entries/${bad}/delete-vote`, { agree: false });
+ok(r.data.cancelled === true, 'Артём refused → request cancelled');
+r = await A('GET', `/api/entries/${bad}`);
+ok(r.status === 200 && !r.data.entry.delete_pending, 'entry kept after refusal');
+await I('DELETE', `/api/entries/${bad}`);
+r = await D('GET', `/api/entries/${bad}`);
+ok(r.data.deletion && r.data.deletion.votes.filter((v) => v.agreed).length === 1, 'new request resets votes');
+await D('POST', `/api/entries/${bad}/delete-vote`, { agree: true });
+r = await A('POST', `/api/entries/${bad}/delete-vote`, { agree: true });
+ok(r.data.deleted === true, 'all agreed → entry deleted');
+r = await A('GET', `/api/entries/${bad}`);
+ok(r.status === 404, 'entry gone');
+
 // удаление
 r = await D('POST', `/api/objects/${oid}/delete-request`);
 ok(r.status === 403, 'only creator requests delete');

@@ -425,7 +425,8 @@ async function viewObject(id, filter = 'all') {
     const amt = e.kind === 'in' ? `<span class="gold">+${fmt(e.amount)} €</span>` : e.kind === 'out' ? `−${fmt(e.amount)} €` : `<span class="muted">${fmt(e.amount)} €</span>`;
     return `<a class="row" href="#/e/${e.id}">${avatar(e.user_id, e.author)}
       <div class="grow"><div class="t" style="font-size:14px">${esc(title)}</div>
-      <div class="s">${esc(sub)}${e.receipts ? ` · <span class="gold" style="display:inline-flex;align-items:center;gap:3px">${I.receipt}${e.receipts}</span>` : ''}</div></div>
+      <div class="s">${esc(sub)}${e.receipts ? ` · <span class="gold" style="display:inline-flex;align-items:center;gap:3px">${I.receipt}${e.receipts}</span>` : ''}</div>
+      ${e.delete_pending ? `<div style="margin-top:4px"><span class="badge red">${e.need_my_vote ? 'удаление · нужен ваш ответ' : 'на удалении'}</span></div>` : ''}</div>
       <div class="r num" style="font-size:14px">${amt}</div></a>`;
   };
   app.innerHTML = `
@@ -439,6 +440,7 @@ async function viewObject(id, filter = 'all') {
       ${o.photo ? `<div class="hero-photo" style="background-image:url('${o.photo}')"></div>` : me.isCreator ? `<a class="hero-photo empty" href="#/o/${id}/edit">${I.camera}<span>Добавить фото объекта</span></a>` : ''}
       <div class="h-sub" style="margin-top:18px">${o.area ? `${fmt(o.area)} м² · ` : ''}${esc(o.status)}${o.purchase_price ? (o.installment ? ` · в рассрочку за ${money(o.purchase_price)}` : ` · куплена за ${money(o.purchase_price)}`) : ''}</div>
       <h1 class="h">${esc(o.name)}</h1>
+      ${(() => { const w = d.entries.filter((e) => e.need_my_vote); return w.length ? `<a class="card gold" href="#/e/${w[0].id}" style="display:block;margin-top:14px;font-size:14px">${w.length === 1 ? 'Операция ждёт' : `${w.length} ${plural(w.length, 'операция ждёт', 'операции ждут', 'операций ждут')}`} вашего согласия на удаление →</a>` : ''; })()}
       ${o.delete_requested ? `<a class="card gold" href="#/o/${id}/delete" style="display:block;margin-top:14px;font-size:14px">Создатель запросил удаление объекта. ${me.canVote ? 'Нужен ваш ответ →' : 'Идёт голосование →'}</a>` : ''}
       ${o.installment ? (() => {
         const ins = o.installment;
@@ -606,7 +608,20 @@ async function viewEntry(eid) {
             <label class="add-tile">${I.gallery}<span>Галерея</span><input type="file" accept="image/*" multiple data-photo aria-label="Загрузить фото"></label>` : ''}
           ${!ids.length && !e.mine ? '<div class="muted" style="font-size:13px">Чеков нет</div>' : ''}
         </div>` : ''}
-      ${e.mine ? '<button class="btn danger" id="del" style="margin-top:32px">Удалить операцию</button>' : '<div class="muted" style="font-size:12px;margin-top:28px;text-align:center">Изменить или удалить операцию может только её автор</div>'}
+      ${d.deletion ? (() => {
+        const v = d.deletion.votes;
+        const agreed = v.filter((x) => x.agreed).length;
+        const mineVote = v.find((x) => x.user_id === state.me.id);
+        return `<div class="label" style="display:flex;justify-content:space-between;margin-top:28px"><span>Запрошено удаление</span><b style="color:var(--text)">${agreed} из ${v.length}</b></div>
+          <div style="display:flex;gap:4px">${v.map((x) => `<i style="flex:1;height:4px;border-radius:2px;background:${x.agreed ? 'var(--gold)' : 'var(--line2)'}"></i>`).join('')}</div>
+          <div class="card list" style="margin-top:12px">${v.map((x) => `<div class="row">${avatar(x.user_id, x.name)}<div class="grow"><div class="t">${esc(x.name)}${x.user_id === state.me.id ? ' <span class="muted">· вы</span>' : ''}</div><div class="s">${ROLE[x.role]}${x.user_id === e.user_id ? ' · автор' : ''}</div></div>
+            ${x.agreed ? `<span class="gold" style="display:flex;align-items:center;gap:6px;font-size:13px">${I.check}Да</span>` : '<span class="muted" style="font-size:13px">ждём ответа</span>'}</div>`).join('')}</div>
+          <div class="muted" style="font-size:12px;margin-top:8px;line-height:1.45">Операция удалится, когда согласятся все участники сделки. Пока она учитывается в расчётах. Любой отказ отменяет запрос.</div>
+          ${d.deletion.canVote && mineVote && !mineVote.agreed ? '<div class="btn-row" style="margin-top:16px"><button class="btn danger" id="vyes" style="flex:1">Согласен удалить</button><button class="btn ghost" id="vno" style="flex:1">Против</button></div>' : ''}
+          ${e.mine ? '<button class="link-btn" id="vcancel" style="display:block;margin:14px auto 0;color:var(--text)">Отозвать запрос</button>' : ''}`;
+      })()
+      : e.mine ? '<button class="btn danger" id="del" style="margin-top:32px">Удалить операцию</button><div class="muted" style="font-size:12px;margin-top:8px;text-align:center">Удалится после согласия всех участников сделки</div>'
+      : '<div class="muted" style="font-size:12px;margin-top:28px;text-align:center">Изменить или удалить операцию может только её автор — с согласия всех участников</div>'}
     </div>`;
   on('[data-open]', 'click', (ev) => openViewer(ids, Number(ev.currentTarget.dataset.open)));
   on('[data-photo]', 'change', async (ev) => {
@@ -623,9 +638,26 @@ async function viewEntry(eid) {
     } catch (ex) { toast(ex.message); }
   });
   const del = app.querySelector('#del');
+  const after = (r) => {
+    delete state.cache[e.object_id];
+    if (r.deleted) { toast('Операция удалена', true); go(`#/o/${e.object_id}`); } else viewEntry(eid);
+  };
   if (del) del.onclick = async () => {
-    if (!confirm('Удалить эту операцию вместе с чеками?')) return;
-    try { await api('DELETE', `/api/entries/${eid}`); delete state.cache[e.object_id]; go(`#/o/${e.object_id}`); } catch (ex) { toast(ex.message); }
+    if (!confirm('Отправить участникам запрос на удаление? Операция удалится вместе с чеками, когда согласятся все.')) return;
+    try { const r = await api('DELETE', `/api/entries/${eid}`); if (!r.deleted) toast('Запрос отправлен участникам', true); after(r); } catch (ex) { toast(ex.message); }
+  };
+  const vyes = app.querySelector('#vyes');
+  if (vyes) vyes.onclick = async () => {
+    if (!confirm('Согласны удалить эту операцию?')) return;
+    try { after(await api('POST', `/api/entries/${eid}/delete-vote`, { agree: true })); } catch (ex) { toast(ex.message); }
+  };
+  const vno = app.querySelector('#vno');
+  if (vno) vno.onclick = async () => {
+    try { await api('POST', `/api/entries/${eid}/delete-vote`, { agree: false }); toast('Запрос отклонён, операция остаётся', true); after({}); } catch (ex) { toast(ex.message); }
+  };
+  const vc = app.querySelector('#vcancel');
+  if (vc) vc.onclick = async () => {
+    try { await api('POST', `/api/entries/${eid}/delete-cancel`); after({}); } catch (ex) { toast(ex.message); }
   };
 }
 

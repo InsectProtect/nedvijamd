@@ -174,7 +174,9 @@ async function loadObject(objectId) {
   const entries = await db.query(
     `SELECT e.id, e.user_id, e.kind, e.source, e.category, e.amount, e.note,
             to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, u.name AS author,
-            (SELECT count(*) FROM receipts r WHERE r.entry_id = e.id) AS receipts
+            (SELECT count(*) FROM receipts r WHERE r.entry_id = e.id) AS receipts,
+            (e.delete_requested_at IS NOT NULL) AS delete_pending,
+            (SELECT coalesce(string_agg(v.user_id::text, ','), '') FROM entry_delete_votes v WHERE v.entry_id = e.id) AS delete_votes
      FROM entries e JOIN users u ON u.id = e.user_id
      WHERE e.object_id = $1 ORDER BY e.entry_date DESC, e.id DESC`,
     [objectId]
@@ -446,7 +448,10 @@ route('GET', '/api/objects/:id', async ({ user, params }) => {
       note: e.note,
       entry_date: e.entry_date,
       receipts: Number(e.receipts),
-      mine: Number(e.user_id) === Number(user.id)
+      mine: Number(e.user_id) === Number(user.id),
+      delete_pending: e.delete_pending === true || e.delete_pending === 't',
+      need_my_vote: (e.delete_pending === true || e.delete_pending === 't') && (me.role === 'investor' || me.role === 'foreman') &&
+        !String(e.delete_votes || '').split(',').includes(String(user.id))
     })),
     calc: { ...calc, invested: undefined, payout: undefined,
       settlement: calc.settlement.map((s) => ({ ...s, fromName: names[s.from], toName: names[s.to] })) },
@@ -618,28 +623,107 @@ route('POST', '/api/objects/:id/entries', async ({ user, params, body }) => {
 route('GET', '/api/entries/:id', async ({ user, params }) => {
   const e = await db.one(
     `SELECT e.id, e.object_id, e.user_id, e.kind, e.source, e.category, e.amount, e.note,
-            to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, u.name AS author
+            to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, u.name AS author,
+            (e.delete_requested_at IS NOT NULL) AS delete_pending
      FROM entries e JOIN users u ON u.id = e.user_id WHERE e.id = $1`,
     [params.id]
   );
   if (!e) fail(404, 'Операция не найдена');
-  await membership(e.object_id, user.id);
+  const me = await membership(e.object_id, user.id);
   const receipts = await db.query(
     `SELECT id, to_char(created_at, 'YYYY-MM-DD') AS created FROM receipts WHERE entry_id = $1 ORDER BY id`,
     [e.id]
   );
+  const pending = e.delete_pending === true || e.delete_pending === 't';
+  let deletion = null;
+  if (pending) {
+    const voters = await entryVoters(e.id, e.object_id);
+    deletion = {
+      votes: voters.map((v) => ({ user_id: Number(v.id), name: v.name, role: v.role, agreed: v.agreed === true || v.agreed === 't' })),
+      canVote: me.role === 'investor' || me.role === 'foreman'
+    };
+  }
   return {
-    entry: { ...e, amount: Number(e.amount), user_id: Number(e.user_id), mine: Number(e.user_id) === Number(user.id) },
-    receipts
+    entry: { ...e, delete_pending: pending, amount: Number(e.amount), user_id: Number(e.user_id), mine: Number(e.user_id) === Number(user.id) },
+    receipts,
+    deletion
   };
 });
 
+// Удаление операции: автор просит, все участники сделки (инвесторы и прорабы) подтверждают.
+async function entryVoters(entryId, objectId) {
+  return db.query(
+    `SELECT u.id, u.name, m.role, EXISTS (SELECT 1 FROM entry_delete_votes v WHERE v.entry_id = $1 AND v.user_id = u.id) AS agreed
+     FROM members m JOIN users u ON u.id = m.user_id
+     WHERE m.object_id = $2 AND m.role IN ('investor','foreman') ORDER BY m.joined_at, u.id`,
+    [entryId, objectId]
+  );
+}
+
+async function maybeFinishEntryDelete(entryId, objectId) {
+  const voters = await entryVoters(entryId, objectId);
+  if (voters.length && voters.every((v) => v.agreed === true || v.agreed === 't')) {
+    await db.query('DELETE FROM entries WHERE id = $1', [entryId]);
+    return true;
+  }
+  return false;
+}
+
+const entryTitle = (e) => `${e.note || e.category || ({ in: 'Взнос', out: 'Расход', plan: 'План' })[e.kind]} · ${fmtEur(e.amount)}`;
+
 route('DELETE', '/api/entries/:id', async ({ user, params }) => {
+  const e = await db.one('SELECT id, object_id, user_id, kind, category, note, amount, delete_requested_at FROM entries WHERE id = $1', [params.id]);
+  if (!e) fail(404, 'Операция не найдена');
+  await membership(e.object_id, user.id);
+  if (Number(e.user_id) !== Number(user.id)) fail(403, 'Запросить удаление может только автор операции');
+  if (!e.delete_requested_at) {
+    await db.query('UPDATE entries SET delete_requested_at = now() WHERE id = $1', [e.id]);
+    await db.query('DELETE FROM entry_delete_votes WHERE entry_id = $1', [e.id]);
+  }
+  await db.query('INSERT INTO entry_delete_votes (entry_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [e.id, user.id]);
+  const deleted = await maybeFinishEntryDelete(e.id, e.object_id);
+  if (!deleted) {
+    const voters = (await entryVoters(e.id, e.object_id)).map((v) => Number(v.id));
+    notifyObject(e.object_id, user.id,
+      `🗑 <b>${tg.escHtml(await objectName(e.object_id))}</b>\n${tg.escHtml(user.name)} просит удалить операцию «${tg.escHtml(entryTitle(e))}». Она удалится, только если согласятся все участники сделки.`,
+      `/e/${e.id}`, voters);
+  }
+  return { deleted, pending: !deleted };
+});
+
+route('POST', '/api/entries/:id/delete-vote', async ({ user, params, body }) => {
+  const e = await db.one('SELECT id, object_id, user_id, kind, category, note, amount, delete_requested_at FROM entries WHERE id = $1', [params.id]);
+  if (!e) fail(404, 'Операция не найдена');
+  const me = await membership(e.object_id, user.id);
+  if (!e.delete_requested_at) fail(400, 'Запроса на удаление нет');
+  if (me.role === 'viewer') fail(403, 'Роль «Просмотр» не голосует');
+  const name = await objectName(e.object_id);
+  if (body.agree === true) {
+    await db.query('INSERT INTO entry_delete_votes (entry_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [e.id, user.id]);
+    const recipients = await entryVoters(e.id, e.object_id);
+    const deleted = await maybeFinishEntryDelete(e.id, e.object_id);
+    if (deleted) {
+      notifyObject(e.object_id, user.id,
+        `🗑 <b>${tg.escHtml(name)}</b>\nОперация «${tg.escHtml(entryTitle(e))}» удалена: все участники согласились.`,
+        `/o/${e.object_id}`, recipients.map((v) => Number(v.id)));
+    }
+    return { deleted };
+  }
+  await db.query('UPDATE entries SET delete_requested_at = NULL WHERE id = $1', [e.id]);
+  await db.query('DELETE FROM entry_delete_votes WHERE entry_id = $1', [e.id]);
+  notifyObject(e.object_id, user.id,
+    `🏠 <b>${tg.escHtml(name)}</b>\n${tg.escHtml(user.name)} против удаления операции «${tg.escHtml(entryTitle(e))}» — запрос отменён, операция остаётся.`,
+    `/e/${e.id}`);
+  return { deleted: false, cancelled: true };
+});
+
+route('POST', '/api/entries/:id/delete-cancel', async ({ user, params }) => {
   const e = await db.one('SELECT object_id, user_id FROM entries WHERE id = $1', [params.id]);
   if (!e) fail(404, 'Операция не найдена');
   await membership(e.object_id, user.id);
-  if (Number(e.user_id) !== Number(user.id)) fail(403, 'Удалять можно только свои операции');
-  await db.query('DELETE FROM entries WHERE id = $1', [params.id]);
+  if (Number(e.user_id) !== Number(user.id)) fail(403, 'Отозвать запрос может только автор');
+  await db.query('UPDATE entries SET delete_requested_at = NULL WHERE id = $1', [params.id]);
+  await db.query('DELETE FROM entry_delete_votes WHERE entry_id = $1', [params.id]);
   return { ok: true };
 });
 
