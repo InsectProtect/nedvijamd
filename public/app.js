@@ -54,6 +54,7 @@ const I = {
   camera: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   gallery: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-9 9"/></svg>',
   check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+  board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9h4M7 13h6M7 16.5h3"/><path d="M16 8.5v4"/><circle cx="16" cy="8" r="1.4" fill="currentColor"/></svg>',
   deals: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18M11 12.5v1.5h2v-1.5"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M7 8l5-5 5 5"/></svg>'
 };
@@ -124,7 +125,7 @@ const tabbar = (active, objId) => `
   <nav class="tabbar" aria-label="Навигация">
     <a href="#/" class="${active === 'home' ? 'on' : ''}">${I.grid}<span>Объекты</span></a>
     <button type="button" class="plus" id="tb-plus" data-obj="${objId || ''}" aria-label="Добавить">${I.plus}</button>
-    <a href="#/market" class="${active === 'market' ? 'on' : ''}">${I.deals}<span>Сделки</span></a>
+    <a href="#/market" class="${active === 'market' ? 'on' : ''}">${I.board}<span>Доска</span></a>
     <a href="#/profile" class="${active === 'profile' ? 'on' : ''}">${I.user}<span>Профиль</span></a>
   </nav>`;
 
@@ -1793,7 +1794,7 @@ async function viewMarket(tab) {
   const mine = d.offers.filter((o) => o.mine && o.status !== 'closed');
   app.innerHTML = `
     <div class="screen">
-      <div class="topbar"><div class="logo">Сделки</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
+      <div class="topbar"><div class="logo">Доска</div>${d.moderation ? `<a class="pill" href="#/market/admin">На проверке · ${d.moderation}</a>` : ''}</div>
       <div class="lead" style="margin-top:6px">Доска совместных инвестиций: авторы предлагают объекты, инвесторы вкладывают деньги. Всё публикуется после проверки, контакты открываются, когда обе стороны согласны.</div>
       ${d.inbox ? `<a class="card gold-b" href="#/market/inbox" style="display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--text);border-color:#5A4E33"><span style="flex:1;font-size:14px">Ждут вашего ответа: <b class="gold">${d.inbox}</b></span>${I.chev}</a>` : `<a href="#/market/inbox" class="muted" style="display:block;font-size:13px;margin-top:12px">Мои отклики и предложения →</a>`}
       <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:16px"><button data-mt="deals" class="${tab === 'deals' ? 'on' : ''}">Сделки · ${deals.length}</button><button data-mt="investors" class="${tab === 'investors' ? 'on' : ''}">Инвесторы · ${d.investors.length}</button></div>
