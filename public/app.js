@@ -120,13 +120,53 @@ function go(hash) {
 }
 
 const backBtn = (href, label = 'Назад') => `<a class="icon-btn back-btn" href="${href}" aria-label="${label}">${I.back}</a>`;
-const tabbar = (active, plusHref) => `
+const tabbar = (active, objId) => `
   <nav class="tabbar" aria-label="Навигация">
-    <a href="#/" class="${active === 'home' ? 'on' : ''}" aria-label="Объекты">${I.grid}</a>
-    ${plusHref ? `<a href="${plusHref}" class="plus" aria-label="Добавить">${I.plus}</a>` : ''}
-    <a href="#/market" class="${active === 'market' ? 'on' : ''}" aria-label="Сделки">${I.deals}</a>
-    <a href="#/profile" class="${active === 'profile' ? 'on' : ''}" aria-label="Профиль">${I.user}</a>
+    <a href="#/" class="${active === 'home' ? 'on' : ''}">${I.grid}<span>Объекты</span></a>
+    <button type="button" class="plus" id="tb-plus" data-obj="${objId || ''}" aria-label="Добавить">${I.plus}</button>
+    <a href="#/market" class="${active === 'market' ? 'on' : ''}">${I.deals}<span>Сделки</span></a>
+    <a href="#/profile" class="${active === 'profile' ? 'on' : ''}">${I.user}<span>Профиль</span></a>
   </nav>`;
+
+// Меню «+»: расход, объект, сделка на доску, анкета инвестора
+function openActionSheet(objId) {
+  const sheet = document.createElement('div');
+  sheet.className = 'viewer sheet-bg';
+  const item = (key, icon, title, sub) => `<button type="button" class="act" data-act="${key}"><span class="act-i">${icon}</span><span class="act-t"><b>${title}</b><small>${sub}</small></span></button>`;
+  const mp = state.market && state.market.my_profile;
+  const main = `<div class="sheet" role="dialog" aria-label="Добавить">
+    <div class="sheet-grip"></div>
+    ${item('entry', I.receipt.replace('width="12" height="12"', ''), 'Добавить расход или аренду', 'В один из ваших объектов')}
+    ${item('object', I.grid, 'Новый объект', 'Квартира, дом, участок — с партнёрами или один')}
+    ${item('offer', I.deals, 'Предложить сделку', 'Найти инвестора на доске сделок')}
+    ${item('investor', I.trend, mp ? 'Моя анкета инвестора' : 'Хочу стать инвестором', mp ? 'Изменить сумму или убрать с доски' : 'Есть деньги — получать предложения сделок')}
+  </div>`;
+  sheet.innerHTML = main;
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+  const close = () => sheet.remove();
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) close(); });
+  const pickObject = async () => {
+    if (objId) { close(); return go(`#/o/${objId}/add`); }
+    let list = [];
+    try { list = (await api('GET', '/api/objects')).objects.filter((o) => !o.closed && (o.role === 'investor' || o.role === 'foreman')); } catch (ex) { toast(ex.message); return; }
+    if (!list.length) { close(); toast('Сначала создайте объект'); return go('#/new'); }
+    if (list.length === 1) { close(); return go(`#/o/${list[0].id}/add`); }
+    sheet.querySelector('.sheet').innerHTML = `<div class="sheet-grip"></div><div style="font-size:17px;font-weight:600;margin-bottom:6px">В какой объект?</div>
+      ${list.map((o) => `<button type="button" class="act" data-oid="${o.id}">${o.photo ? `<span class="act-i" style="background:url('${o.photo}') center/cover"></span>` : `<span class="act-i">${I.grid}</span>`}<span class="act-t"><b data-nt>${esc(o.name)}</b><small>${esc(o.status)}</small></span></button>`).join('')}`;
+    sheet.querySelectorAll('[data-oid]').forEach((b) => b.addEventListener('click', () => { close(); go(`#/o/${b.dataset.oid}/add`); }));
+  };
+  sheet.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
+    const a = b.dataset.act;
+    if (a === 'entry') return pickObject();
+    close();
+    go(a === 'object' ? '#/new' : a === 'offer' ? '#/market/new' : '#/market/profile');
+  }));
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('#tb-plus');
+  if (b) openActionSheet(b.dataset.obj ? Number(b.dataset.obj) : null);
+});
 
 function on(sel, ev, fn) {
   app.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -338,7 +378,7 @@ async function viewHome() {
         ${history.map(histRow).join('')}
       </details>` : ''}
     </div>
-    ${tabbar('home', '#/new')}`;
+    ${tabbar('home')}`;
   bindFolds();
 }
 
@@ -592,7 +632,7 @@ function viewProfile() {
         : `<div class="card" style="margin-top:10px;font-size:14px;line-height:1.5;color:#B5B5BA">Подключите Telegram, чтобы получать уведомления о расходах, долях и удалении и входить в Долю прямо из бота.<button class="btn sm" id="tglink" style="margin-top:12px;display:flex">Подключить Telegram</button></div>`) : ''}
       ${TG ? '' : '<button class="btn ghost" id="out" style="margin-top:24px">Выйти</button>'}
     </div>
-    ${tabbar('profile', '#/new')}`;
+    ${tabbar('profile')}`;
   bindLang();
   bindFolds();
   const pd = app.querySelector('#pd');
@@ -1040,7 +1080,7 @@ async function viewObject(id, filter = 'all') {
         }).join('');
       })() : `<div class="empty">${filter === 'all' ? 'Операций пока нет.' : 'Нет операций этого типа.'}${me.canAdd && filter === 'all' ? '<br>Добавьте взнос или расход.' : ''}</div>`}
     </div>
-    ${tabbar('', me.canAdd ? `#/o/${id}/add` : null)}`;
+    ${tabbar('', me.canAdd ? id : null)}`;
   on('[data-f]', 'click', (e) => viewObject(id, e.currentTarget.dataset.f));
   on('[data-adv]', 'click', async (e) => {
     const st = e.currentTarget.dataset.st;
@@ -1768,7 +1808,7 @@ async function viewMarket(tab) {
         ${myApproved.length ? '' : '<div class="muted" style="font-size:12px;line-height:1.45;margin-bottom:4px">Чтобы предложить сделку инвестору, сначала опубликуйте её во вкладке «Сделки».</div>'}
         ${d.investors.length ? d.investors.map(investorCard).join('') : '<div class="card empty">Пока нет опубликованных анкет инвесторов.</div>'}`}
     </div>
-    ${tabbar('market', '#/market/new')}`;
+    ${tabbar('market')}`;
   on('[data-mt]', 'click', (e) => go(e.currentTarget.dataset.mt === 'investors' ? '#/market/investors' : '#/market'));
   on('[data-propose]', 'click', (e) => proposeSheet(Number(e.currentTarget.dataset.propose), myApproved));
 }

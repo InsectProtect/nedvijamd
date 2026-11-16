@@ -126,9 +126,19 @@ select.field { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 .add-tile input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
 .tabbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + var(--safe-b)); width: calc(min(480px, 100vw) - 32px); height: 66px; background: rgba(28, 28, 31, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid var(--line2); border-radius: 33px; display: flex; align-items: center; justify-content: space-around; z-index: 10; }
-.tabbar a { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.tabbar a { min-width: 60px; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); font-size: 10.5px; font-weight: 500; }
 .tabbar a.on { color: var(--text); }
-.tabbar a.plus { width: 52px; height: 52px; border-radius: 26px; background: var(--gold); color: #0D0D0E; }
+.tabbar .plus { width: 52px; height: 52px; border-radius: 26px; background: var(--gold); color: #0D0D0E; border: none; display: flex; align-items: center; justify-content: center; }
+.sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: #3A3A40; margin: -8px auto 14px; }
+.act { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 4px; background: none; border: none; border-bottom: 1px solid var(--line); text-align: left; color: var(--text); }
+.act:last-child { border-bottom: none; }
+.act-i { width: 44px; height: 44px; flex: none; border-radius: 14px; background: #24221C; color: var(--gold); display: flex; align-items: center; justify-content: center; }
+.act-i svg { width: 22px; height: 22px; }
+.act-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.act-t b { font-size: 15px; font-weight: 600; }
+.act-t small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.sheet-bg .sheet { transform: translateY(24px); opacity: 0; transition: transform .2s ease, opacity .2s ease; }
+.sheet-bg.open .sheet { transform: none; opacity: 1; }
 .tabbar svg { width: 22px; height: 22px; }
 
 .toast { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 12px); background: #2A1B19; color: #F4D6CF; border: 1px solid #4A2C27; padding: 12px 16px; border-radius: 14px; font-size: 14px; z-index: 100; max-width: calc(100vw - 32px); }
@@ -221,3 +231,5 @@ details.fold.month .rows { padding-bottom: 6px; }
 .offer-gallery { display: flex; gap: 8px; overflow-x: auto; margin: 14px -20px 0; padding: 0 20px; scroll-snap-type: x mandatory; }
 .offer-gallery button { flex: none; width: 82%; height: 220px; border-radius: 18px; border: none; background: #1F1F22 center/cover no-repeat; scroll-snap-align: start; }
 .offer-gallery button:only-child { width: 100%; }
+.viewer.sheet-bg { flex-direction: column; justify-content: flex-end; align-items: center; background: rgba(0,0,0,.6); }
+.viewer.sheet-bg .sheet { padding-bottom: calc(28px + var(--safe-b)); }
